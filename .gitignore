@@ -8,3 +8,11 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Training data and generated model artifacts
+src/assets/hand_data/
+artifacts/
+
+# Linter and type checker caches
+.ruff_cache/
+.ty_cache/
