@@ -1,2 +1,3 @@
-def main() -> None:
-    print("Hello from hand-classification!")
+from hand_classification.cli import main
+
+__all__ = ["main"]
