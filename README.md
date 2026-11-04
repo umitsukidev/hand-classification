@@ -1,0 +1,73 @@
+# グー・チョキ・パー画像分類
+
+TensorFlow/Keras の CNN で、画像をグー・チョキ・パーに分類します。学習用の画像は自分で用意してください。自動ダウンロードは行いません。
+
+## セットアップ
+
+Python 3.11 以上と [uv](https://docs.astral.sh/uv/) を用意し、プロジェクトのルートで依存関係をインストールします。
+
+```bash
+uv sync
+```
+
+## 画像の配置
+
+画像を次のディレクトリに分けて置きます。フォルダ名とクラスの順序は固定です。
+
+```text
+src/assets/hand_data/
+├── rock/      # グー
+├── scissors/  # チョキ
+└── paper/     # パー
+```
+
+各クラスに2枚以上の画像が必要です。対応形式は JPEG、PNG、BMP、GIF です。画像は学習時に読み込まれ、すべて96×96ピクセルのRGBに揃えられます。
+
+## 学習
+
+```bash
+uv run hand-classification train
+```
+
+デフォルトではクラスごとに乱数seed 123で学習用と検証用へ分割し、最大60 epoch 学習します。検証用画像は各クラスに最低1枚確保されます。早期終了を使い、モデルと評価結果を `artifacts/` に保存します。
+
+設定を変える場合はオプションを指定します。
+
+```bash
+uv run hand-classification train \
+  --data-dir src/assets/hand_data \
+  --artifacts-dir artifacts \
+  --epochs 60 \
+  --batch-size 32 \
+  --validation-split 0.2 \
+  --seed 123
+```
+
+保存されるファイルは `hand_classifier.keras`（モデル）、`metadata.json`（クラス順と画像サイズ）、`training_history.png`（正解率の推移）、`confusion_matrix.png`（検証データの混同行列）です。
+
+## 画像を判定
+
+学習後、画像ファイルを指定します。
+
+```bash
+uv run hand-classification predict path/to/hand.jpg
+```
+
+別の保存先を使った場合は、同じディレクトリを指定します。
+
+```bash
+uv run hand-classification predict path/to/hand.jpg --artifacts-dir artifacts
+```
+
+判定したクラスと各クラスの確率を表示します。
+
+## 開発チェック
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run ty check
+uv run python -m unittest discover -s tests
+```
+
+表示される正解率と混同行列は、学習時に分けた検証データでの結果です。独立したテストデータでの評価ではなく、実データに対する精度も確認していません。
