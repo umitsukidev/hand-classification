@@ -1,5 +1,8 @@
 mod app;
 mod backend;
+mod components;
+mod predict_view;
+mod train_view;
 mod types;
 
 use gpui::QuitMode;

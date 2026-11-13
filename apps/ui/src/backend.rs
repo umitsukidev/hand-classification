@@ -25,10 +25,13 @@ pub fn locate_project_root() -> PathBuf {
         }
     }
 
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."))
+    for ancestor in Path::new(env!("CARGO_MANIFEST_DIR")).ancestors() {
+        if ancestor.join("pyproject.toml").is_file() {
+            return ancestor.to_path_buf();
+        }
+    }
+
+    PathBuf::from(".")
 }
 
 pub fn build_cli_command(project_root: &Path) -> Command {

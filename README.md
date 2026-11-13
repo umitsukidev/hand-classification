@@ -15,7 +15,7 @@ uv sync
 画像を次のディレクトリに分けて置きます。フォルダ名とクラスの順序は固定です。
 
 ```text
-src/assets/hand_data/
+assets/hand_data/
 ├── rock/      # グー
 ├── scissors/  # チョキ
 └── paper/     # パー
@@ -35,7 +35,7 @@ uv run hand-classification train
 
 ```bash
 uv run hand-classification train \
-  --data-dir src/assets/hand_data \
+  --data-dir assets/hand_data \
   --artifacts-dir artifacts \
   --epochs 60 \
   --batch-size 32 \
@@ -72,13 +72,23 @@ cargo run
 - **画像判定タブ**: 画像ファイルのドラッグ＆ドロップまたはファイル選択から推論を実行し、予測クラス・確率バー・最近の判定履歴を表示します。
 - **モデル学習タブ**: `data-dir` / `artifacts-dir` や Epochs・Batch Size・Validation Split・Seed を設定して学習を実行し、リアルタイムログと評価グラフ（`training_history.png` / `confusion_matrix.png`）を確認できます。
 
+## 構成
+
+```text
+.
+├── apps/
+│   └── ui/                       # GPUI デスクトップ UI (Rust / Cargo workspace member)
+└── packages/
+    └── hand-classification/      # TensorFlow/Keras 分類パッケージ (Python / uv workspace member)
+```
+
 ## 開発チェック
 
 ```bash
 uv run ruff check .
 uv run ruff format --check .
 uv run ty check
-uv run python -m unittest discover -s tests
+uv run python -m unittest discover -s packages/hand-classification/tests
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test

@@ -98,7 +98,7 @@ pub struct TrainConfig {
 impl TrainConfig {
     pub fn new(project_root: &Path) -> Self {
         Self {
-            data_dir: project_root.join("src/assets/hand_data"),
+            data_dir: project_root.join("assets/hand_data"),
             artifacts_dir: project_root.join("artifacts"),
             epochs: 60,
             batch_size: 32,

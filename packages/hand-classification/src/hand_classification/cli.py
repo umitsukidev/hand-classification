@@ -31,8 +31,8 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument(
         "--data-dir",
         type=Path,
-        default=Path("src/assets/hand_data"),
-        help="rock/scissors/paper の画像フォルダ（既定: src/assets/hand_data）",
+        default=Path("assets/hand_data"),
+        help="rock/scissors/paper の画像フォルダ（既定: assets/hand_data）",
     )
     train_parser.add_argument(
         "--artifacts-dir",
