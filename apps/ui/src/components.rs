@@ -1,6 +1,6 @@
 use gpui::{
-    ColorExt, Context, Div, ElementId, FontWeight, Rgba, SharedString, Stateful, colors::Colors,
-    div, prelude::*,
+    Context, Div, ElementId, FontWeight, Rgba, SharedString, Stateful, colors::Colors, div,
+    prelude::*,
 };
 
 use crate::{app::HandClassificationApp, types::ActiveTab};

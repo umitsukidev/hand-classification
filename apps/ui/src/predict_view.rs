@@ -1,6 +1,6 @@
 use gpui::{
-    ColorExt, Context, Div, ExternalPaths, FontWeight, ObjectFit, colors::Colors, div, img,
-    prelude::*, px, relative, rgb,
+    Context, Div, ExternalPaths, FontWeight, ObjectFit, colors::Colors, div, img, prelude::*, px,
+    relative, rgb,
 };
 
 use crate::{
@@ -114,7 +114,7 @@ fn render_image_panel(
                 .items_center()
                 .justify_center()
                 .p_4()
-                .on_drag_over(move |style, _: &ExternalPaths, _window, _cx| {
+                .drag_over::<ExternalPaths>(move |style, _, _window, _cx| {
                     style.border_color(accent).bg(accent.opacity(0.08))
                 })
                 .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, cx| {

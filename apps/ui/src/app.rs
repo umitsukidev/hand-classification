@@ -489,7 +489,7 @@ pub fn run(cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::TestApp;
+    use gpui::TestAppContext;
     use std::fs;
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -503,27 +503,26 @@ mod tests {
         dir
     }
 
-    #[test]
-    fn switching_tabs_and_adjusting_training_hyperparameters() {
+    #[gpui::test]
+    fn switching_tabs_and_adjusting_training_hyperparameters(cx: &mut TestAppContext) {
         let root = temp_dir("tabs_and_config");
-        let mut app = TestApp::new();
-        let mut window =
-            app.open_window(|_, _| HandClassificationApp::with_project_root(root.clone()));
+        let (view, cx) =
+            cx.add_window_view(|_, _| HandClassificationApp::with_project_root(root.clone()));
 
-        window.read(|view, _| {
+        view.read_with(cx, |view, _| {
             assert_eq!(view.active_tab, ActiveTab::Predict);
             assert_eq!(view.train_config.epochs, 60);
             assert_eq!(view.train_config.batch_size, 32);
             assert!(!view.artifacts_status.model_ready);
         });
 
-        window.update(|view, _, cx| {
+        view.update_in(cx, |view, _, cx| {
             view.switch_tab(ActiveTab::Train, cx);
             view.adjust_epochs(10, cx);
             view.adjust_seed(-3, cx);
         });
 
-        window.read(|view, _| {
+        view.read_with(cx, |view, _| {
             assert_eq!(view.active_tab, ActiveTab::Train);
             assert_eq!(view.train_config.epochs, 70);
             assert_eq!(view.train_config.seed, 120);
@@ -532,30 +531,29 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
-    #[test]
-    fn rejects_missing_or_unsupported_images_without_spawning_worker() {
+    #[gpui::test]
+    fn rejects_missing_or_unsupported_images_without_spawning_worker(cx: &mut TestAppContext) {
         let root = temp_dir("invalid_images");
         let text_file = root.join("notes.txt");
         fs::write(&text_file, "not an image").unwrap();
 
-        let mut app = TestApp::new();
-        let mut window =
-            app.open_window(|_, _| HandClassificationApp::with_project_root(root.clone()));
+        let (view, cx) =
+            cx.add_window_view(|_, _| HandClassificationApp::with_project_root(root.clone()));
 
-        window.update(|view, _, cx| {
+        view.update_in(cx, |view, _, cx| {
             view.select_image_and_predict(root.join("missing.png"), cx);
         });
-        window.read(|view, _| {
+        view.read_with(cx, |view, _| {
             assert!(matches!(
                 view.prediction_state,
                 PredictionState::Error { .. }
             ));
         });
 
-        window.update(|view, _, cx| {
+        view.update_in(cx, |view, _, cx| {
             view.select_image_and_predict(text_file.clone(), cx);
         });
-        window.read(|view, _| match &view.prediction_state {
+        view.read_with(cx, |view, _| match &view.prediction_state {
             PredictionState::Error { message, .. } => {
                 assert!(message.contains("対応していないファイル形式"));
             }
