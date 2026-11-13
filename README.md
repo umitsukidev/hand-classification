@@ -4,7 +4,7 @@ TensorFlow/Keras の CNN で、画像をグー・チョキ・パーに分類し�
 
 ## セットアップ
 
-Python 3.11 以上と [uv](https://docs.astral.sh/uv/) を用意し、プロジェクトのルートで依存関係をインストールします。
+Python 3.11 以上と [uv](https://docs.astral.sh/uv/) を用意し、プロジェクトのルートで依存関係をインストールします。GPUI デスクトップ UI を起動する場合は Rust 1.95 以上も必要です。
 
 ```bash
 uv sync
@@ -61,6 +61,17 @@ uv run hand-classification predict path/to/hand.jpg --artifacts-dir artifacts
 
 判定したクラスと各クラスの確率を表示します。
 
+## デスクトップ UI (GPUI)
+
+GPUI を使ったデスクトップ UI を起動できます。
+
+```bash
+cargo run
+```
+
+- **画像判定タブ**: 画像ファイルのドラッグ＆ドロップまたはファイル選択から推論を実行し、予測クラス・確率バー・最近の判定履歴を表示します。
+- **モデル学習タブ**: `data-dir` / `artifacts-dir` や Epochs・Batch Size・Validation Split・Seed を設定して学習を実行し、リアルタイムログと評価グラフ（`training_history.png` / `confusion_matrix.png`）を確認できます。
+
 ## 開発チェック
 
 ```bash
@@ -68,6 +79,9 @@ uv run ruff check .
 uv run ruff format --check .
 uv run ty check
 uv run python -m unittest discover -s tests
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
 ```
 
 表示される正解率と混同行列は、学習時に分けた検証データでの結果です。独立したテストデータでの評価ではなく、実データに対する精度も確認していません。

@@ -16,3 +16,6 @@ artifacts/
 # Linter and type checker caches
 .ruff_cache/
 .ty_cache/
+
+# Rust build artifacts
+target/
