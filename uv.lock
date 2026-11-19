@@ -9,6 +9,12 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 
+[manifest]
+members = [
+    "hand-classification",
+    "hand-classification-workspace",
+]
+
 [[package]]
 name = "absl-py"
 version = "2.5.1"
@@ -559,12 +565,27 @@ wheels = [
 [[package]]
 name = "hand-classification"
 version = "0.1.0"
-source = { editable = "." }
+source = { editable = "packages/hand-classification" }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "tensorflow" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "matplotlib", specifier = ">=3.11.2" },
+    { name = "numpy", specifier = ">=2.4.6" },
+    { name = "tensorflow", specifier = ">=2.21.0" },
+]
+
+[[package]]
+name = "hand-classification-workspace"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "hand-classification" },
 ]
 
 [package.dev-dependencies]
@@ -574,11 +595,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "matplotlib", specifier = ">=3.11.2" },
-    { name = "numpy", specifier = ">=2.4.6" },
-    { name = "tensorflow", specifier = ">=2.21.0" },
-]
+requires-dist = [{ name = "hand-classification", editable = "packages/hand-classification" }]
 
 [package.metadata.requires-dev]
 dev = [

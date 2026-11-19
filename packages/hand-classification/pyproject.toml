@@ -1,0 +1,20 @@
+[project]
+name = "hand-classification"
+version = "0.1.0"
+description = "グー・チョキ・パーの画像を分類するモデル"
+authors = [
+    { name = "kurage", email = "git@umitsuki.dev" },
+]
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.11.2",
+    "numpy>=2.4.6",
+    "tensorflow>=2.21.0",
+]
+
+[project.scripts]
+hand-classification = "hand_classification:main"
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14.0"]
+build-backend = "uv_build"

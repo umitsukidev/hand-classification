@@ -10,9 +10,12 @@ wheels/
 .venv
 
 # Training data and generated model artifacts
-src/assets/hand_data/
+assets/hand_data/
 artifacts/
 
 # Linter and type checker caches
 .ruff_cache/
 .ty_cache/
+
+# Rust build artifacts
+target/
