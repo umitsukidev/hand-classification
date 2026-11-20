@@ -119,19 +119,11 @@ pub fn inspect_dataset(data_dir: &Path) -> DatasetSummary {
         };
     }
 
-    let insufficient = classes
-        .iter()
-        .filter(|class| class.image_count < 2)
-        .map(|class| format!("{} ({}枚)", class.directory, class.image_count))
-        .collect::<Vec<_>>();
-    let ready = insufficient.is_empty();
+    let ready = classes.iter().all(|class| class.image_count >= 2);
     let message = if ready {
         "学習可能（各クラス2枚以上）".to_string()
     } else {
-        format!(
-            "各クラスに2枚以上の画像が必要です: {}",
-            insufficient.join(", ")
-        )
+        "各クラスに2枚以上の画像が必要です".to_string()
     };
 
     DatasetSummary {

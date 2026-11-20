@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use gpui::{
-    Context, DefiniteLength, Div, DragMoveEvent, FontWeight, Image, ObjectFit, Stateful,
+    Context, DefiniteLength, Div, DragMoveEvent, FontWeight, Image, ObjectFit, Stateful, Window,
     colors::Colors, div, img, prelude::*, px, relative, rgb,
 };
 
@@ -25,6 +25,21 @@ const MISCLASSIFICATION_CARD_WIDTH: f32 = 120.0;
 
 #[derive(Clone, Copy)]
 struct DraggedTrainPaneSplitter;
+
+struct ClassCountTooltip(String);
+
+impl Render for ClassCountTooltip {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .max_w(px(360.))
+            .whitespace_normal()
+            .p_2()
+            .rounded_md()
+            .bg(rgb(0x0f172a))
+            .text_color(rgb(0xf8fafc))
+            .child(self.0.clone())
+    }
+}
 
 pub fn render_train_tab(
     app: &HandClassificationApp,
@@ -94,9 +109,26 @@ fn render_train_config_card(
         .dataset_summary
         .classes
         .iter()
-        .map(|class| format!("{}: {}枚", class.directory, class.image_count))
-        .collect::<Vec<_>>()
-        .join(" / ");
+        .map(|class| {
+            let label = format!("{}: {}枚", class.directory, class.image_count);
+            let tooltip_label = label.clone();
+            div()
+                .id(format!("class-count-{}", class.directory))
+                .max_w(px(220.))
+                .min_w(px(0.))
+                .overflow_hidden()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .bg(colors.background)
+                .border_1()
+                .border_color(colors.border)
+                .tooltip(move |_window, cx| {
+                    cx.new(|_| ClassCountTooltip(tooltip_label.clone())).into()
+                })
+                .child(div().text_xs().whitespace_normal().child(label))
+        })
+        .collect::<Vec<_>>();
     let dataset_color = if app.dataset_summary.ready {
         rgb(0x1f9d68)
     } else {
@@ -107,6 +139,7 @@ fn render_train_config_card(
         .gap_4()
         .child(
             div()
+                .id("train-config-header")
                 .flex()
                 .flex_row()
                 .items_center()
@@ -114,6 +147,8 @@ fn render_train_config_card(
                 .gap_4()
                 .child(
                     div()
+                        .flex_1()
+                        .min_w(px(0.))
                         .flex()
                         .flex_col()
                         .gap_0p5()
@@ -122,14 +157,12 @@ fn render_train_config_card(
                                 .text_base()
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .child("モデル学習設定"),
-                        )
-                        .child(div().text_xs().text_color(colors.disabled).child(format!(
-                            "{} — {}",
-                            class_counts, app.dataset_summary.message
-                        ))),
+                        ),
                 )
                 .child(
                     div()
+                        .id("train-config-actions")
+                        .flex_shrink_0()
                         .flex()
                         .flex_row()
                         .items_center()
@@ -145,6 +178,7 @@ fn render_train_config_card(
                         .child(if app.train_running {
                             action_button("stop-train", "学習を停止", true, true, colors)
                                 .bg(rgb(0xdc2626))
+                                .debug_selector(|| "stop-train".to_string())
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.stop_training(cx);
                                 }))
@@ -156,6 +190,7 @@ fn render_train_config_card(
                                 app.dataset_summary.ready,
                                 colors,
                             )
+                            .debug_selector(|| "start-train".to_string())
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if this.dataset_summary.ready {
                                     this.begin_training(cx);
@@ -163,6 +198,44 @@ fn render_train_config_card(
                             }))
                         }),
                 ),
+        )
+        .child(
+            div()
+                .id("dataset-class-counts")
+                .debug_selector(|| "dataset-class-counts".to_string())
+                .w_full()
+                .max_h(px(96.))
+                .overflow_y_scroll()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(colors.disabled)
+                        .child("クラス別画像枚数"),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .min_w(px(0.))
+                        .flex()
+                        .flex_row()
+                        .flex_wrap()
+                        .gap_2()
+                        .children(class_counts),
+                ),
+        )
+        .child(
+            div()
+                .id("dataset-validation-message")
+                .w_full()
+                .min_w(px(0.))
+                .text_xs()
+                .text_color(colors.disabled)
+                .whitespace_normal()
+                .child(app.dataset_summary.message.clone()),
         )
         .child(
             div()

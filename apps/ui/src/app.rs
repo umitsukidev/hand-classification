@@ -628,6 +628,71 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    #[cfg(unix)]
+    #[gpui::test]
+    fn long_class_list_keeps_start_button_visible_and_clickable(cx: &mut TestAppContext) {
+        let root = temp_dir("long_class_list");
+        let data_dir = root.join("assets/hand_data");
+        let mut class_names = (0..=10)
+            .map(|index| format!("{:03}_pct", index * 10))
+            .collect::<Vec<_>>();
+        let long_class_name = format!("very-long-class-name-{}", "label-".repeat(18));
+        class_names.push(long_class_name.clone());
+        for class_name in class_names {
+            let class_dir = data_dir.join(class_name);
+            fs::create_dir_all(&class_dir).unwrap();
+            fs::write(class_dir.join("one.png"), b"image").unwrap();
+            fs::write(class_dir.join("two.png"), b"image").unwrap();
+        }
+
+        let cli_stub = root.join(".venv/bin/hand-classification");
+        fs::create_dir_all(cli_stub.parent().unwrap()).unwrap();
+        fs::write(&cli_stub, "#!/bin/sh\nexit 0\n").unwrap();
+
+        let (view, cx) =
+            cx.add_window_view(|_, _| HandClassificationApp::with_project_root(root.clone()));
+        view.update_in(cx, |view, _, cx| {
+            view.switch_tab(ActiveTab::Train, cx);
+        });
+        cx.simulate_resize(size(px(860.), px(760.)));
+        cx.run_until_parked();
+
+        let viewport_bounds = cx.update(|window, _| window.bounds());
+        let button_bounds = cx
+            .debug_bounds("start-train")
+            .expect("the training button should be rendered");
+        let class_counts_bounds = cx
+            .debug_bounds("dataset-class-counts")
+            .expect("the class count list should be rendered");
+        assert_eq!(
+            view.read_with(cx, |view, _| view.dataset_summary.classes.len()),
+            12
+        );
+        assert!(view.read_with(cx, |view, _| {
+            view.dataset_summary
+                .classes
+                .iter()
+                .any(|class| class.directory == long_class_name)
+        }));
+        assert!(button_bounds.left() >= viewport_bounds.left());
+        assert!(button_bounds.right() <= viewport_bounds.right());
+        assert!(button_bounds.top() >= viewport_bounds.top());
+        assert!(button_bounds.bottom() <= viewport_bounds.bottom());
+        assert!(class_counts_bounds.size.height <= px(96.));
+
+        cx.simulate_click(button_bounds.center(), Modifiers::none());
+        view.read_with(cx, |view, _| {
+            assert!(!view.train_running);
+            assert!(
+                view.train_status
+                    .as_deref()
+                    .is_some_and(|message| message.contains("学習プロセスを起動できませんでした"))
+            );
+        });
+
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[gpui::test]
     fn training_pane_ratio_can_be_resized_and_survives_tab_changes(cx: &mut TestAppContext) {
         let root = temp_dir("train_pane_ratio");
