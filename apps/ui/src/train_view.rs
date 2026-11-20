@@ -1,17 +1,24 @@
 use std::sync::Arc;
 
 use gpui::{
-    Context, Div, FontWeight, Image, ObjectFit, colors::Colors, div, img, prelude::*, px, rgb,
+    Context, DefiniteLength, Div, DragMoveEvent, FontWeight, Image, ObjectFit, Stateful,
+    colors::Colors, div, img, prelude::*, px, rgb,
 };
 
 use crate::{
-    app::{DirectoryTarget, HandClassificationApp},
+    app::{
+        DirectoryTarget, HandClassificationApp, MIN_EVALUATION_WIDTH, MIN_TRAIN_LOG_WIDTH,
+        TRAIN_SPLITTER_WIDTH,
+    },
     components::{action_button, panel_card, small_chip, status_pill},
     types::{MisclassificationReport, MisclassifiedImage, display_path},
 };
 
 const BATCH_SIZE_OPTIONS: &[usize] = &[8, 16, 32, 64];
 const VALIDATION_SPLIT_OPTIONS: &[f32] = &[0.1, 0.2, 0.25, 0.3];
+
+#[derive(Clone, Copy)]
+struct DraggedTrainPaneSplitter;
 
 pub fn render_train_tab(
     app: &HandClassificationApp,
@@ -32,10 +39,42 @@ pub fn render_train_tab(
                 .min_h(px(0.))
                 .flex()
                 .flex_row()
-                .gap_5()
-                .child(render_train_log_card(app, colors))
-                .child(render_evaluation_card(app, colors)),
+                .gap_0()
+                .on_drag_move::<DraggedTrainPaneSplitter>(cx.listener(
+                    |this, event: &DragMoveEvent<DraggedTrainPaneSplitter>, _, cx| {
+                        this.resize_train_panes(event.event.position.x, event.bounds, cx);
+                    },
+                ))
+                .child(
+                    render_train_log_card(app, colors)
+                        .flex_1()
+                        .min_w(px(MIN_TRAIN_LOG_WIDTH))
+                        .flex_basis(DefiniteLength::Fraction(1.0 - app.train_evaluation_ratio)),
+                )
+                .child(render_train_pane_splitter(colors))
+                .child(
+                    render_evaluation_card(app, colors)
+                        .flex_1()
+                        .min_w(px(MIN_EVALUATION_WIDTH))
+                        .flex_basis(DefiniteLength::Fraction(app.train_evaluation_ratio)),
+                ),
         )
+}
+
+fn render_train_pane_splitter(colors: &Colors) -> Stateful<Div> {
+    div()
+        .id("train-pane-splitter")
+        .w(px(TRAIN_SPLITTER_WIDTH))
+        .h_full()
+        .flex_shrink_0()
+        .flex()
+        .justify_center()
+        .cursor_col_resize()
+        .hover(|style| style.bg(colors.separator.opacity(0.4)))
+        .child(div().w(px(1.)).h_full().bg(colors.border))
+        .on_drag(DraggedTrainPaneSplitter, |_, _, _, cx| {
+            cx.new(|_| gpui::Empty)
+        })
 }
 
 fn render_train_config_card(

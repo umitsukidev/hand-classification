@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use gpui::{
-    App, Bounds, Context, Div, FontWeight, PathPromptOptions, Task, TitlebarOptions, Window,
-    WindowBounds, WindowOptions, colors::Colors, div, prelude::*, px, rgb, size,
+    App, Bounds, Context, Div, FontWeight, PathPromptOptions, Pixels, Task, TitlebarOptions,
+    Window, WindowBounds, WindowOptions, colors::Colors, div, point, prelude::*, px, rgb, size,
 };
 
 use crate::{
@@ -21,6 +21,10 @@ use crate::{
 
 const MAX_RECENT_PREDICTIONS: usize = 6;
 const MAX_TRAIN_LOG_LINES: usize = 300;
+const DEFAULT_TRAIN_EVALUATION_RATIO: f32 = 0.58;
+pub(crate) const TRAIN_SPLITTER_WIDTH: f32 = 16.0;
+pub(crate) const MIN_TRAIN_LOG_WIDTH: f32 = 260.0;
+pub(crate) const MIN_EVALUATION_WIDTH: f32 = 360.0;
 
 #[derive(Clone, Copy)]
 pub enum DirectoryTarget {
@@ -40,6 +44,7 @@ pub struct HandClassificationApp {
     pub train_logs: Vec<String>,
     pub train_status: Option<String>,
     pub train_running: bool,
+    pub train_evaluation_ratio: f32,
     train_handle: Option<TrainingHandle>,
     worker: WorkerClient,
     predict_generation: u64,
@@ -79,6 +84,7 @@ impl HandClassificationApp {
             train_logs: Vec::new(),
             train_status: None,
             train_running: false,
+            train_evaluation_ratio: DEFAULT_TRAIN_EVALUATION_RATIO,
             train_handle: None,
             worker: WorkerClient::default(),
             predict_generation: 0,
@@ -312,6 +318,16 @@ impl HandClassificationApp {
         self.train_logs.push(line);
     }
 
+    pub fn resize_train_panes(
+        &mut self,
+        pointer_x: Pixels,
+        container_bounds: Bounds<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.train_evaluation_ratio = evaluation_ratio_for_pointer(pointer_x, container_bounds);
+        cx.notify();
+    }
+
     pub fn adjust_epochs(&mut self, delta: isize, cx: &mut Context<Self>) {
         self.train_config.epochs =
             (self.train_config.epochs as isize + delta).clamp(1, 500) as usize;
@@ -447,6 +463,21 @@ impl HandClassificationApp {
     }
 }
 
+fn evaluation_ratio_for_pointer(pointer_x: Pixels, container_bounds: Bounds<Pixels>) -> f32 {
+    let pane_width = container_bounds.size.width - px(TRAIN_SPLITTER_WIDTH);
+    if pane_width <= px(0.) {
+        return DEFAULT_TRAIN_EVALUATION_RATIO;
+    }
+
+    let half_pane_width = px(f32::from(pane_width) / 2.0);
+    let minimum_log_width = px(MIN_TRAIN_LOG_WIDTH).min(half_pane_width);
+    let minimum_evaluation_width = px(MIN_EVALUATION_WIDTH).min(pane_width - minimum_log_width);
+    let log_width = (pointer_x - container_bounds.left() - px(TRAIN_SPLITTER_WIDTH / 2.0))
+        .clamp(minimum_log_width, pane_width - minimum_evaluation_width);
+
+    1.0 - log_width / pane_width
+}
+
 impl Render for HandClassificationApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::for_appearance(window);
@@ -529,6 +560,39 @@ mod tests {
         });
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[gpui::test]
+    fn training_pane_ratio_can_be_resized_and_survives_tab_changes(cx: &mut TestAppContext) {
+        let root = temp_dir("train_pane_ratio");
+        let (view, cx) =
+            cx.add_window_view(|_, _| HandClassificationApp::with_project_root(root.clone()));
+        let container_bounds = Bounds::new(point(px(0.), px(0.)), size(px(800.), px(400.)));
+
+        view.update_in(cx, |view, _, cx| {
+            view.resize_train_panes(px(400.), container_bounds, cx);
+            view.switch_tab(ActiveTab::Predict, cx);
+            view.switch_tab(ActiveTab::Train, cx);
+        });
+
+        view.read_with(cx, |view, _| {
+            assert!((view.train_evaluation_ratio - 0.5).abs() < 0.001);
+        });
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn training_pane_ratio_respects_minimum_widths() {
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(800.), px(400.)));
+        let leftmost = evaluation_ratio_for_pointer(px(-100.), bounds);
+        let rightmost = evaluation_ratio_for_pointer(px(900.), bounds);
+        let pane_width = px(800.) - px(TRAIN_SPLITTER_WIDTH);
+        let minimum_evaluation_ratio = px(MIN_EVALUATION_WIDTH) / pane_width;
+        let maximum_evaluation_ratio = 1.0 - px(MIN_TRAIN_LOG_WIDTH) / pane_width;
+
+        assert!((leftmost - maximum_evaluation_ratio).abs() < 0.001);
+        assert!((rightmost - minimum_evaluation_ratio).abs() < 0.001);
     }
 
     #[gpui::test]
