@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use gpui::{Image, Rgba, rgb};
+use gpui::Image;
 use serde::Deserialize;
 
 pub const SUPPORTED_IMAGE_EXTENSIONS: &[&str] = &["bmp", "gif", "jpeg", "jpg", "png"];
@@ -12,40 +12,6 @@ pub const SUPPORTED_IMAGE_EXTENSIONS: &[&str] = &["bmp", "gif", "jpeg", "jpg", "
 pub enum ActiveTab {
     Predict,
     Train,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HandClass {
-    Rock,
-    Scissors,
-    Paper,
-}
-
-impl HandClass {
-    pub fn from_directory(directory: &str) -> Option<Self> {
-        match directory {
-            "rock" => Some(Self::Rock),
-            "scissors" => Some(Self::Scissors),
-            "paper" => Some(Self::Paper),
-            _ => None,
-        }
-    }
-
-    pub fn symbol(self) -> &'static str {
-        match self {
-            Self::Rock => "✊",
-            Self::Scissors => "✌️",
-            Self::Paper => "✋",
-        }
-    }
-
-    pub fn accent_color(self) -> Rgba {
-        match self {
-            Self::Rock => rgb(0xe05d44),
-            Self::Scissors => rgb(0x2d7ff9),
-            Self::Paper => rgb(0x1f9d68),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -109,10 +75,14 @@ impl TrainConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DatasetClassCount {
+    pub directory: String,
+    pub image_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DatasetSummary {
-    pub rock_count: usize,
-    pub scissors_count: usize,
-    pub paper_count: usize,
+    pub classes: Vec<DatasetClassCount>,
     pub ready: bool,
     pub message: String,
 }
@@ -120,6 +90,7 @@ pub struct DatasetSummary {
 #[derive(Clone, Debug)]
 pub struct ArtifactsStatus {
     pub model_ready: bool,
+    pub class_labels: Vec<String>,
     pub training_history_png: Option<Arc<Image>>,
     pub confusion_matrix_png: Option<Arc<Image>>,
     pub misclassification_report: Option<MisclassificationReport>,

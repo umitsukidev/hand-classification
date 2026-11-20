@@ -6,9 +6,7 @@ use gpui::{
 use crate::{
     app::HandClassificationApp,
     components::{action_button, panel_card},
-    types::{
-        ActiveTab, ClassProbability, HandClass, PredictionState, display_path, format_percentage,
-    },
+    types::{ActiveTab, ClassProbability, PredictionState, display_path, format_percentage},
 };
 
 pub fn render_predict_tab(
@@ -161,7 +159,7 @@ fn render_image_panel(
                                 .flex_col()
                                 .items_center()
                                 .gap_2()
-                                .child(div().text_3xl().child("✊ ✌️ ✋"))
+                                .child(div().text_3xl().child("🖼️"))
                                 .child(
                                     div()
                                         .text_sm()
@@ -220,9 +218,8 @@ fn render_result_panel(
         PredictionState::Idle => card.child(render_idle_state(app, colors, cx)),
         PredictionState::Running { .. } => card.child(render_running_state(colors)),
         PredictionState::Ready(result) => {
-            let hand_class = HandClass::from_directory(&result.predicted_directory);
-            let accent = hand_class.map_or(colors.selected, HandClass::accent_color);
-            let symbol = hand_class.map_or("🤖", HandClass::symbol);
+            let accent = colors.selected;
+            let symbol = "🗂️";
             let top_probability = result
                 .probabilities
                 .iter()
@@ -450,9 +447,7 @@ fn render_recent_strip(
                     .and_then(|name| name.to_str())
                     .unwrap_or("image")
                     .to_string();
-                let hand = HandClass::from_directory(&item.predicted_directory);
-                let accent = hand.map_or(colors.selected, HandClass::accent_color);
-                let symbol = hand.map_or("", HandClass::symbol);
+                let accent = colors.selected;
                 let is_current = app.selected_image.as_ref() == Some(&item.image_path);
 
                 div()
@@ -469,7 +464,6 @@ fn render_recent_strip(
                     .border_color(if is_current { accent } else { colors.border })
                     .cursor_pointer()
                     .hover(|style| style.bg(colors.separator.opacity(0.35)))
-                    .child(div().text_sm().child(symbol))
                     .child(
                         div()
                             .text_xs()
@@ -491,9 +485,7 @@ fn render_recent_strip(
 }
 
 fn render_probability_row(entry: &ClassProbability, is_winner: bool, colors: &Colors) -> Div {
-    let hand_class = HandClass::from_directory(&entry.directory);
-    let accent = hand_class.map_or(colors.selected, HandClass::accent_color);
-    let symbol = hand_class.map_or("", HandClass::symbol);
+    let accent = colors.selected;
 
     div()
         .flex()
@@ -517,7 +509,6 @@ fn render_probability_row(entry: &ClassProbability, is_winner: bool, colors: &Co
                         } else {
                             FontWeight::NORMAL
                         })
-                        .child(symbol)
                         .child(entry.label.clone()),
                 )
                 .child(

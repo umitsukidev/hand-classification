@@ -9,11 +9,11 @@ use std::{
 
 use async_channel::Receiver;
 use gpui::{Image, ImageFormat};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::types::{
-    ArtifactsStatus, DatasetSummary, MisclassificationReport, PredictionResult, TrainConfig,
-    TrainEvent, WorkerResponse, is_supported_image_path,
+    ArtifactsStatus, DatasetClassCount, DatasetSummary, MisclassificationReport, PredictionResult,
+    TrainConfig, TrainEvent, WorkerResponse, is_supported_image_path,
 };
 
 pub fn locate_project_root() -> PathBuf {
@@ -63,8 +63,11 @@ fn count_images_recursive(directory: &Path) -> usize {
     };
     let mut count = 0;
     for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
         let path = entry.path();
-        if path.is_dir() {
+        if file_type.is_dir() {
             count += count_images_recursive(&path);
         } else if path.is_file() && is_supported_image_path(&path) {
             count += 1;
@@ -76,52 +79,63 @@ fn count_images_recursive(directory: &Path) -> usize {
 pub fn inspect_dataset(data_dir: &Path) -> DatasetSummary {
     if !data_dir.is_dir() {
         return DatasetSummary {
-            rock_count: 0,
-            scissors_count: 0,
-            paper_count: 0,
+            classes: Vec::new(),
             ready: false,
             message: "データフォルダが見つかりません".to_string(),
         };
     }
 
-    let rock_dir = data_dir.join("rock");
-    let scissors_dir = data_dir.join("scissors");
-    let paper_dir = data_dir.join("paper");
+    let mut class_directories = fs::read_dir(data_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            path.is_dir()
+                .then(|| (path, entry.file_name().to_string_lossy().into_owned()))
+        })
+        .collect::<Vec<_>>();
+    class_directories.sort_by(|left, right| left.1.cmp(&right.1));
+    let classes = class_directories
+        .into_iter()
+        .map(|(path, directory)| {
+            let image_count = count_images_recursive(&path);
+            DatasetClassCount {
+                directory,
+                image_count,
+            }
+        })
+        .collect::<Vec<_>>();
 
-    let rock_count = count_images_recursive(&rock_dir);
-    let scissors_count = count_images_recursive(&scissors_dir);
-    let paper_count = count_images_recursive(&paper_dir);
-
-    let missing_dirs = [
-        (!rock_dir.is_dir()).then_some("rock"),
-        (!scissors_dir.is_dir()).then_some("scissors"),
-        (!paper_dir.is_dir()).then_some("paper"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>();
-
-    if !missing_dirs.is_empty() {
+    if classes.len() < 2 {
+        let class_count = classes.len();
         return DatasetSummary {
-            rock_count,
-            scissors_count,
-            paper_count,
+            classes,
             ready: false,
-            message: format!("不足フォルダ: {}", missing_dirs.join(", ")),
+            message: format!(
+                "クラスディレクトリが2つ以上必要です（現在: {}個）",
+                class_count
+            ),
         };
     }
 
-    let ready = rock_count >= 2 && scissors_count >= 2 && paper_count >= 2;
+    let insufficient = classes
+        .iter()
+        .filter(|class| class.image_count < 2)
+        .map(|class| format!("{} ({}枚)", class.directory, class.image_count))
+        .collect::<Vec<_>>();
+    let ready = insufficient.is_empty();
     let message = if ready {
         "学習可能（各クラス2枚以上）".to_string()
     } else {
-        "各クラスに2枚以上の画像が必要です".to_string()
+        format!(
+            "各クラスに2枚以上の画像が必要です: {}",
+            insufficient.join(", ")
+        )
     };
 
     DatasetSummary {
-        rock_count,
-        scissors_count,
-        paper_count,
+        classes,
         ready,
         message,
     }
@@ -138,12 +152,35 @@ fn load_misclassification_report(artifacts_dir: &Path) -> Option<Misclassificati
     serde_json::from_slice(&bytes).ok()
 }
 
+#[derive(Deserialize)]
+struct ClassifierMetadata {
+    class_directories: Vec<String>,
+    class_labels: Vec<String>,
+}
+
+fn load_class_labels(artifacts_dir: &Path) -> Vec<String> {
+    let metadata_path = artifacts_dir.join("metadata.json");
+    let Ok(bytes) = fs::read(metadata_path) else {
+        return Vec::new();
+    };
+    let Ok(metadata) = serde_json::from_slice::<ClassifierMetadata>(&bytes) else {
+        return Vec::new();
+    };
+    if metadata.class_directories.len() < 2
+        || metadata.class_directories.len() != metadata.class_labels.len()
+    {
+        return Vec::new();
+    }
+    metadata.class_labels
+}
+
 pub fn inspect_artifacts(artifacts_dir: &Path) -> ArtifactsStatus {
     let model_ready = artifacts_dir.join("hand_classifier.keras").is_file()
         && artifacts_dir.join("metadata.json").is_file();
 
     ArtifactsStatus {
         model_ready,
+        class_labels: load_class_labels(artifacts_dir),
         training_history_png: load_png_image(&artifacts_dir.join("training_history.png")),
         confusion_matrix_png: load_png_image(&artifacts_dir.join("confusion_matrix.png")),
         misclassification_report: load_misclassification_report(artifacts_dir),

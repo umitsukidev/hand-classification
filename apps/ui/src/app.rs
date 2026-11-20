@@ -210,7 +210,7 @@ impl HandClassificationApp {
 
     pub fn pick_directory(&mut self, target: DirectoryTarget, cx: &mut Context<Self>) {
         let prompt = match target {
-            DirectoryTarget::Data => "学習用画像フォルダ（rock / scissors / paper）を選択",
+            DirectoryTarget::Data => "学習用画像フォルダ（クラス別サブフォルダ）を選択",
             DirectoryTarget::Artifacts => "モデル・評価結果の保存先フォルダを選択",
         };
         let receiver = cx.prompt_for_paths(PathPromptOptions {
@@ -434,7 +434,7 @@ impl HandClassificationApp {
                         div()
                             .text_lg()
                             .font_weight(FontWeight::BOLD)
-                            .child("グー・チョキ・パー画像分類"),
+                            .child("画像分類"),
                     )
                     .child(
                         div()
@@ -567,7 +567,7 @@ pub fn app_window_options(cx: &App) -> WindowOptions {
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         titlebar: Some(TitlebarOptions {
-            title: Some("グー・チョキ・パー画像分類".into()),
+            title: Some("画像分類".into()),
             ..Default::default()
         }),
         window_min_size: Some(size(px(860.), px(620.))),
@@ -748,12 +748,18 @@ mod tests {
             },
         };
         let matrix_image = crate::types::MisclassifiedImage {
-            image_path: root.join("rock-scissors.png"),
-            true_label: "グー".to_string(),
-            predicted_label: "チョキ".to_string(),
+            image_path: root.join("class-a-class-b.png"),
+            true_label: "class-a".to_string(),
+            predicted_label: "class-b".to_string(),
         };
 
         view.update_in(cx, |view, _, cx| {
+            view.artifacts_status.class_labels = vec![
+                "class-a".to_string(),
+                "class-b".to_string(),
+                "クラスC".to_string(),
+                "class-d".to_string(),
+            ];
             view.artifacts_status.confusion_matrix_png = Some(Arc::new(chart));
             view.artifacts_status.misclassification_report =
                 Some(crate::types::MisclassificationReport {
@@ -771,10 +777,11 @@ mod tests {
         let cell_bounds = cx
             .debug_bounds("confusion-matrix-cell-0-1")
             .expect("the off-diagonal cell hit target should be rendered");
-        let axes_left = chart_bounds.left() + chart_bounds.size.width * 0.4;
-        let axes_right = chart_bounds.left() + chart_bounds.size.width * 0.65;
+        assert!(cx.debug_bounds("confusion-matrix-cell-3-3").is_some());
+        let axes_left = chart_bounds.left() + chart_bounds.size.width * 0.3375;
+        let axes_right = chart_bounds.left() + chart_bounds.size.width * 0.525;
         let axes_top = chart_bounds.top() + chart_bounds.size.height * 0.1;
-        let axes_bottom = chart_bounds.top() + chart_bounds.size.height * 0.35;
+        let axes_bottom = chart_bounds.top() + chart_bounds.size.height * 0.2875;
         assert!((cell_bounds.left() - axes_left).abs() < px(1.));
         assert!((cell_bounds.right() - axes_right).abs() < px(1.));
         assert!((cell_bounds.top() - axes_top).abs() < px(1.));
@@ -842,18 +849,28 @@ mod tests {
     fn inspect_dataset_and_artifacts_reflect_disk_state() {
         let root = temp_dir("disk_state");
         let data_dir = root.join("hand_data");
-        for class_name in ["rock", "scissors", "paper"] {
+        for class_name in ["猫", "delta", "alpha", "beta"] {
             let class_dir = data_dir.join(class_name);
             fs::create_dir_all(&class_dir).unwrap();
             fs::write(class_dir.join("a.png"), b"png").unwrap();
             fs::write(class_dir.join("b.jpg"), b"jpg").unwrap();
         }
+        fs::create_dir_all(data_dir.join("猫/nested")).unwrap();
+        fs::write(data_dir.join("猫/nested/c.png"), b"png").unwrap();
+        fs::write(data_dir.join("root.png"), b"png").unwrap();
 
         let summary = inspect_dataset(&data_dir);
         assert!(summary.ready);
-        assert_eq!(summary.rock_count, 2);
-        assert_eq!(summary.scissors_count, 2);
-        assert_eq!(summary.paper_count, 2);
+        assert_eq!(
+            summary
+                .classes
+                .iter()
+                .map(|class| class.directory.as_str())
+                .collect::<Vec<_>>(),
+            ["alpha", "beta", "delta", "猫"]
+        );
+        assert_eq!(summary.classes[0].image_count, 2);
+        assert_eq!(summary.classes[3].image_count, 3);
 
         let artifacts_dir = root.join("artifacts");
         fs::create_dir_all(&artifacts_dir).unwrap();
@@ -862,7 +879,15 @@ mod tests {
         assert!(initial_artifacts.misclassification_report.is_none());
 
         fs::write(artifacts_dir.join("hand_classifier.keras"), b"model").unwrap();
-        fs::write(artifacts_dir.join("metadata.json"), b"{}").unwrap();
+        fs::write(
+            artifacts_dir.join("metadata.json"),
+            r#"{
+                "class_directories": ["rock", "scissors", "paper"],
+                "class_labels": ["グー", "チョキ", "パー"],
+                "image_size": [96, 96]
+            }"#,
+        )
+        .unwrap();
         assert!(inspect_artifacts(&artifacts_dir).model_ready);
 
         fs::write(
@@ -879,6 +904,7 @@ mod tests {
         .unwrap();
         let report_status = inspect_artifacts(&artifacts_dir);
         let report = report_status.misclassification_report.unwrap();
+        assert_eq!(report_status.class_labels, ["グー", "チョキ", "パー"]);
         assert_eq!(report.validation_count, 3);
         assert_eq!(report.images.len(), 1);
         assert_eq!(
@@ -929,6 +955,35 @@ mod tests {
         assert!(empty_report.images.is_empty());
         assert_eq!(empty_report.correctly_classified_images, Some(vec![]));
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inspect_dataset_matches_python_for_nested_symlinks() {
+        let root = temp_dir("nested_symlinks");
+        let data_dir = root.join("data");
+        let alpha_dir = data_dir.join("alpha");
+        let beta_dir = data_dir.join("beta");
+        let external_dir = root.join("external");
+        fs::create_dir_all(&alpha_dir).unwrap();
+        fs::create_dir_all(&beta_dir).unwrap();
+        fs::create_dir_all(&external_dir).unwrap();
+        fs::write(alpha_dir.join("a.png"), b"png").unwrap();
+        fs::write(alpha_dir.join("b.png"), b"png").unwrap();
+        fs::write(beta_dir.join("a.png"), b"png").unwrap();
+        fs::write(beta_dir.join("b.png"), b"png").unwrap();
+        fs::write(external_dir.join("external.png"), b"png").unwrap();
+        std::os::unix::fs::symlink(alpha_dir.join("a.png"), alpha_dir.join("linked.png")).unwrap();
+        std::os::unix::fs::symlink(&external_dir, alpha_dir.join("linked-dir")).unwrap();
+        std::os::unix::fs::symlink(&alpha_dir, alpha_dir.join("loop")).unwrap();
+
+        let summary = inspect_dataset(&data_dir);
+
+        assert!(summary.ready);
+        assert_eq!(summary.classes[0].directory, "alpha");
+        assert_eq!(summary.classes[0].image_count, 3);
+        assert_eq!(summary.classes[1].image_count, 2);
         let _ = fs::remove_dir_all(root);
     }
 }

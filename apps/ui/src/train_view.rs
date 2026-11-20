@@ -90,6 +90,13 @@ fn render_train_config_card(
 ) -> Div {
     let data_label = display_path(&app.train_config.data_dir, &app.project_root);
     let artifacts_label = display_path(&app.train_config.artifacts_dir, &app.project_root);
+    let class_counts = app
+        .dataset_summary
+        .classes
+        .iter()
+        .map(|class| format!("{}: {}枚", class.directory, class.image_count))
+        .collect::<Vec<_>>()
+        .join(" / ");
     let dataset_color = if app.dataset_summary.ready {
         rgb(0x1f9d68)
     } else {
@@ -117,11 +124,8 @@ fn render_train_config_card(
                                 .child("モデル学習設定"),
                         )
                         .child(div().text_xs().text_color(colors.disabled).child(format!(
-                            "rock: {}枚 / scissors: {}枚 / paper: {}枚 — {}",
-                            app.dataset_summary.rock_count,
-                            app.dataset_summary.scissors_count,
-                            app.dataset_summary.paper_count,
-                            app.dataset_summary.message
+                            "{} — {}",
+                            class_counts, app.dataset_summary.message
                         ))),
                 )
                 .child(
@@ -692,7 +696,9 @@ pub fn render_evaluation_preview(
         ),
         EvaluationPreview::ConfusionMatrix => {
             let report = app.artifacts_status.misclassification_report.as_ref();
-            let plot_geometry = report.and_then(clickable_confusion_matrix_geometry);
+            let class_count = app.artifacts_status.class_labels.len();
+            let plot_geometry =
+                report.and_then(|report| clickable_confusion_matrix_geometry(report, class_count));
             let can_click_cells =
                 plot_geometry.is_some() && app.artifacts_status.confusion_matrix_png.is_some();
             let description = if can_click_cells {
@@ -704,6 +710,7 @@ pub fn render_evaluation_preview(
             let body = render_confusion_matrix_image_preview(
                 app.artifacts_status.confusion_matrix_png.clone(),
                 plot_geometry,
+                class_count,
                 colors,
                 cx,
             );
@@ -719,6 +726,7 @@ pub fn render_evaluation_preview(
                         report,
                         true_class_index,
                         predicted_class_index,
+                        &app.artifacts_status.class_labels,
                         colors,
                         cx,
                     )
@@ -729,8 +737,8 @@ pub fn render_evaluation_preview(
                 "セル内の検証画像",
                 format!(
                     "正解: {} / 予測: {}",
-                    matrix_class_label(true_class_index),
-                    matrix_class_label(predicted_class_index)
+                    matrix_class_label(&app.artifacts_status.class_labels, true_class_index,),
+                    matrix_class_label(&app.artifacts_status.class_labels, predicted_class_index,)
                 ),
                 body,
             )
@@ -855,7 +863,11 @@ fn evaluation_preview_back_label(preview: &EvaluationPreview) -> Option<&'static
 
 fn clickable_confusion_matrix_geometry(
     report: &MisclassificationReport,
+    class_count: usize,
 ) -> Option<&ConfusionMatrixPlotGeometry> {
+    if class_count < 2 {
+        return None;
+    }
     report.correctly_classified_images.as_ref()?;
     report
         .confusion_matrix_plot
@@ -866,16 +878,16 @@ fn clickable_confusion_matrix_geometry(
 fn render_clickable_confusion_matrix_image(
     image: Arc<Image>,
     geometry: &ConfusionMatrixPlotGeometry,
+    class_count: usize,
     colors: &Colors,
     cx: &mut Context<HandClassificationApp>,
 ) -> Div {
-    const CLASS_COUNT: usize = 3;
     const MAX_IMAGE_HEIGHT: f32 = 520.0;
-    let mut hit_targets = Vec::with_capacity(CLASS_COUNT * CLASS_COUNT);
-    for true_class_index in 0..CLASS_COUNT {
-        for predicted_class_index in 0..CLASS_COUNT {
+    let mut hit_targets = Vec::with_capacity(class_count * class_count);
+    for true_class_index in 0..class_count {
+        for predicted_class_index in 0..class_count {
             let cell = geometry
-                .cell_bounds(true_class_index, predicted_class_index, CLASS_COUNT)
+                .cell_bounds(true_class_index, predicted_class_index, class_count)
                 .expect("valid confusion matrix cell bounds");
             hit_targets.push(render_confusion_matrix_cell_hit_target(
                 cell,
@@ -932,6 +944,7 @@ fn render_matrix_cell_gallery(
     report: &MisclassificationReport,
     true_class_index: usize,
     predicted_class_index: usize,
+    class_labels: &[String],
     colors: &Colors,
     cx: &mut Context<HandClassificationApp>,
 ) -> Div {
@@ -939,7 +952,12 @@ fn render_matrix_cell_gallery(
         true_class_index,
         predicted_class_index,
     };
-    let images = matrix_cell_images(report, true_class_index, predicted_class_index);
+    let images = matrix_cell_images(
+        report,
+        true_class_index,
+        predicted_class_index,
+        class_labels,
+    );
 
     if images.is_empty() {
         return div().flex().flex_col().gap_3().child(
@@ -993,23 +1011,32 @@ fn matrix_cell_images(
     report: &MisclassificationReport,
     true_class_index: usize,
     predicted_class_index: usize,
+    class_labels: &[String],
 ) -> Vec<MisclassifiedImage> {
     report
         .images
         .iter()
         .chain(report.correctly_classified_images.iter().flatten())
         .filter(|image| {
-            matrix_class_index(&image.true_label) == Some(true_class_index)
-                && matrix_class_index(&image.predicted_label) == Some(predicted_class_index)
+            matrix_class_index(&image.true_label, class_labels) == Some(true_class_index)
+                && matrix_class_index(&image.predicted_label, class_labels)
+                    == Some(predicted_class_index)
         })
         .cloned()
         .collect()
 }
 
-fn matrix_class_index(label: &str) -> Option<usize> {
-    MATRIX_CLASS_LABELS
+fn matrix_class_index(label: &str, class_labels: &[String]) -> Option<usize> {
+    class_labels
         .iter()
-        .position(|class_label| *class_label == label)
+        .position(|class_label| class_label == label)
+}
+
+fn matrix_class_label(class_labels: &[String], index: usize) -> &str {
+    class_labels
+        .get(index)
+        .map(String::as_str)
+        .unwrap_or("不明")
 }
 
 fn render_evaluation_image_preview(
@@ -1077,6 +1104,7 @@ fn render_evaluation_image_preview(
 fn render_confusion_matrix_image_preview(
     chart: Option<Arc<Image>>,
     geometry: Option<&ConfusionMatrixPlotGeometry>,
+    class_count: usize,
     colors: &Colors,
     cx: &mut Context<HandClassificationApp>,
 ) -> Div {
@@ -1087,7 +1115,7 @@ fn render_confusion_matrix_image_preview(
         .gap_3()
         .child(match (chart, geometry) {
             (Some(image), Some(geometry)) => {
-                render_clickable_confusion_matrix_image(image, geometry, colors, cx)
+                render_clickable_confusion_matrix_image(image, geometry, class_count, colors, cx)
             }
             (Some(image), None) => div()
                 .w_full()
@@ -1122,12 +1150,6 @@ fn render_confusion_matrix_image_preview(
                 .child("この評価結果にはセルを画像一覧へ対応づける情報がありません。再学習すると混同行列から確認できます。"),
         )
     }
-}
-
-const MATRIX_CLASS_LABELS: [&str; 3] = ["グー", "チョキ", "パー"];
-
-fn matrix_class_label(index: usize) -> &'static str {
-    MATRIX_CLASS_LABELS.get(index).copied().unwrap_or("不明")
 }
 
 #[cfg(test)]
@@ -1177,48 +1199,51 @@ mod tests {
 
     #[test]
     fn matrix_cell_images_selects_only_the_requested_true_and_predicted_classes() {
+        let class_labels = ["alpha", "beta", "gamma", "delta"]
+            .map(str::to_string)
+            .to_vec();
         let report = MisclassificationReport {
             validation_count: 4,
             images: vec![
                 MisclassifiedImage {
-                    image_path: PathBuf::from("rock-scissors.png"),
-                    true_label: "グー".to_string(),
-                    predicted_label: "チョキ".to_string(),
+                    image_path: PathBuf::from("alpha-beta.png"),
+                    true_label: "alpha".to_string(),
+                    predicted_label: "beta".to_string(),
                 },
                 MisclassifiedImage {
                     image_path: PathBuf::from("invalid.png"),
                     true_label: "unknown".to_string(),
-                    predicted_label: "パー".to_string(),
+                    predicted_label: "delta".to_string(),
                 },
             ],
             correctly_classified_images: Some(vec![
                 MisclassifiedImage {
-                    image_path: PathBuf::from("rock-rock.png"),
-                    true_label: "グー".to_string(),
-                    predicted_label: "グー".to_string(),
+                    image_path: PathBuf::from("alpha-alpha.png"),
+                    true_label: "alpha".to_string(),
+                    predicted_label: "alpha".to_string(),
                 },
                 MisclassifiedImage {
-                    image_path: PathBuf::from("paper-paper.png"),
-                    true_label: "パー".to_string(),
-                    predicted_label: "パー".to_string(),
+                    image_path: PathBuf::from("delta-delta.png"),
+                    true_label: "delta".to_string(),
+                    predicted_label: "delta".to_string(),
                 },
             ]),
             confusion_matrix_plot: None,
         };
 
-        assert_eq!(matrix_cell_images(&report, 0, 1).len(), 1);
+        assert_eq!(matrix_cell_images(&report, 0, 1, &class_labels).len(), 1);
         assert_eq!(
-            matrix_cell_images(&report, 0, 1)[0].image_path,
-            PathBuf::from("rock-scissors.png")
+            matrix_cell_images(&report, 0, 1, &class_labels)[0].image_path,
+            PathBuf::from("alpha-beta.png")
         );
         assert_eq!(
-            matrix_cell_images(&report, 0, 0)[0].image_path,
-            PathBuf::from("rock-rock.png")
+            matrix_cell_images(&report, 0, 0, &class_labels)[0].image_path,
+            PathBuf::from("alpha-alpha.png")
         );
         assert_eq!(
-            matrix_cell_images(&report, 2, 2)[0].image_path,
-            PathBuf::from("paper-paper.png")
+            matrix_cell_images(&report, 3, 3, &class_labels)[0].image_path,
+            PathBuf::from("delta-delta.png")
         );
-        assert!(matrix_cell_images(&report, 1, 2).is_empty());
+        assert!(matrix_cell_images(&report, 2, 3, &class_labels).is_empty());
     }
 }
