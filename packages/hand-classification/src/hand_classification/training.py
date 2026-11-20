@@ -169,8 +169,7 @@ def save_confusion_matrix(matrix: np.ndarray, output_path: Path) -> None:
     import matplotlib.pyplot as plt
 
     figure, axes = plt.subplots(figsize=(7, 6))
-    image = axes.imshow(matrix, cmap="Blues")
-    figure.colorbar(image, ax=axes, label="Image count")
+    axes.imshow(matrix, cmap="Blues", origin="upper")
     axes.set(
         xticks=range(len(CLASS_LABELS)),
         yticks=range(len(CLASS_LABELS)),
@@ -180,7 +179,10 @@ def save_confusion_matrix(matrix: np.ndarray, output_path: Path) -> None:
         ylabel="True class",
         title="Confusion matrix",
     )
-    axes.invert_yaxis()
+    axes.set_xticks(np.arange(1, matrix.shape[1]) - 0.5, minor=True)
+    axes.set_yticks(np.arange(1, matrix.shape[0]) - 0.5, minor=True)
+    axes.grid(which="minor", color="#64748b", linewidth=0.8)
+    axes.tick_params(which="minor", length=0)
     threshold = matrix.max() / 2 if matrix.size else 0
     for row in range(matrix.shape[0]):
         for column in range(matrix.shape[1]):
