@@ -130,6 +130,8 @@ pub struct MisclassificationReport {
     pub validation_count: usize,
     #[serde(rename = "misclassified_images")]
     pub images: Vec<MisclassifiedImage>,
+    #[serde(default)]
+    pub correctly_classified_images: Option<Vec<MisclassifiedImage>>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]

@@ -21,7 +21,7 @@ const BATCH_SIZE_OPTIONS: &[usize] = &[8, 16, 32, 64];
 const VALIDATION_SPLIT_OPTIONS: &[f32] = &[0.1, 0.2, 0.25, 0.3];
 const MISCLASSIFIED_THUMBNAIL_SIZE: f32 = 112.0;
 const EVALUATION_CHART_MAX_HEIGHT: f32 = 260.0;
-const MISCLASSIFICATION_CARD_WIDTH: f32 = 128.0;
+const MISCLASSIFICATION_CARD_WIDTH: f32 = 120.0;
 
 #[derive(Clone, Copy)]
 struct DraggedTrainPaneSplitter;
@@ -32,7 +32,6 @@ pub fn render_train_tab(
     cx: &mut Context<HandClassificationApp>,
 ) -> Div {
     div()
-        .relative()
         .flex_1()
         .min_h(px(0.))
         .flex()
@@ -66,9 +65,6 @@ pub fn render_train_tab(
                         .flex_basis(DefiniteLength::Fraction(app.train_evaluation_ratio)),
                 ),
         )
-        .when_some(app.evaluation_preview.clone(), |tab, preview| {
-            tab.child(render_evaluation_preview(app, preview, colors, cx))
-        })
 }
 
 fn render_train_pane_splitter(colors: &Colors) -> Stateful<Div> {
@@ -534,20 +530,24 @@ fn render_misclassification_report(
                 report.validation_count
             )))
         }
-        Some(report) => section
-            .child(div().text_xs().text_color(colors.disabled).child(format!(
-                "{} 件 / 検証画像 {} 枚",
-                report.images.len(),
-                report.validation_count
-            )))
-            .child(
-                div().flex().flex_row().flex_wrap().gap_2().children(
-                    report
-                        .images
-                        .iter()
-                        .map(|image| render_misclassified_image(image, colors, cx)),
-                ),
-            ),
+        Some(report) => {
+            section
+                .child(div().text_xs().text_color(colors.disabled).child(format!(
+                    "{} 件 / 検証画像 {} 枚",
+                    report.images.len(),
+                    report.validation_count
+                )))
+                .child(div().flex().flex_row().flex_wrap().gap_2().children(
+                    report.images.iter().map(|image| {
+                        render_misclassified_image(
+                            image,
+                            EvaluationPreviewOrigin::MisclassificationList,
+                            colors,
+                            cx,
+                        )
+                    }),
+                ))
+        }
         None => section.child(
             div()
                 .text_xs()
@@ -559,15 +559,15 @@ fn render_misclassification_report(
 
 fn render_misclassified_image(
     image: &MisclassifiedImage,
+    origin: EvaluationPreviewOrigin,
     colors: &Colors,
     cx: &mut Context<HandClassificationApp>,
 ) -> Stateful<Div> {
     let image_for_preview = image.clone();
+    let origin_for_preview = origin.clone();
+    let image_id = format!("evaluation-image-{origin:?}-{}", image.image_path.display());
     div()
-        .id(format!(
-            "misclassified-image-{}",
-            image.image_path.display()
-        ))
+        .id(image_id)
         .flex()
         .flex_col()
         .items_center()
@@ -618,11 +618,7 @@ fn render_misclassified_image(
         .cursor_pointer()
         .hover(|style| style.bg(colors.separator.opacity(0.2)))
         .on_click(cx.listener(move |this, _, _, cx| {
-            this.show_evaluation_image(
-                image_for_preview.clone(),
-                EvaluationPreviewOrigin::MisclassificationList,
-                cx,
-            );
+            this.show_evaluation_image(image_for_preview.clone(), origin_for_preview.clone(), cx);
         }))
 }
 
@@ -678,57 +674,69 @@ fn render_chart_slot(
     }
 }
 
-fn render_evaluation_preview(
+pub fn render_evaluation_preview(
     app: &HandClassificationApp,
     preview: EvaluationPreview,
     colors: &Colors,
     cx: &mut Context<HandClassificationApp>,
 ) -> Stateful<Div> {
-    let (title, description, body, back_label) = match preview {
-        EvaluationPreview::Image { image, origin } => {
-            let back_label = if matches!(
-                origin,
-                EvaluationPreviewOrigin::ConfusionMatrixCell { .. }
-            ) {
-                "混同行列に戻る"
-            } else {
-                "戻る"
-            };
-            (
-                "検証画像",
-                format!("正解: {} / 予測: {}", image.true_label, image.predicted_label),
-                render_evaluation_image_preview(&image, &app.project_root, colors),
-                back_label,
-            )
-        }
-        EvaluationPreview::ConfusionMatrix => (
-            "混同行列",
-            "検証データの正解クラスと予測クラスを表示しています。".to_string(),
-            render_confusion_matrix_image_preview(
-                app.artifacts_status.confusion_matrix_png.clone(),
-                colors,
+    let back_label = evaluation_preview_back_label(&preview);
+    let (title, description, body) = match preview {
+        EvaluationPreview::Image { image, .. } => (
+            "検証画像",
+            format!(
+                "正解: {} / 予測: {}",
+                image.true_label, image.predicted_label
             ),
-            "戻る",
+            render_evaluation_image_preview(&image, &app.project_root, colors),
         ),
+        EvaluationPreview::ConfusionMatrix => {
+            let report = app.artifacts_status.misclassification_report.as_ref();
+            let (description, body) = match report {
+                Some(report) if report.correctly_classified_images.is_some() => {
+                    (
+                        "行が正解クラス、列が予測クラスです。セルを選ぶと該当画像を表示します。"
+                            .to_string(),
+                        render_interactive_confusion_matrix(report, colors, cx),
+                    )
+                }
+                _ => (
+                    "保存済みの混同行列を拡大表示しています。セル内画像を開くには再学習してください。"
+                        .to_string(),
+                    render_confusion_matrix_image_preview(
+                        app.artifacts_status.confusion_matrix_png.clone(),
+                        colors,
+                    ),
+                ),
+            };
+            ("混同行列", description, body)
+        }
         EvaluationPreview::ConfusionMatrixCell {
             true_class_index,
             predicted_class_index,
-        } => (
-            "セル内の検証画像",
-            format!(
-                "正解: {} / 予測: {}",
-                matrix_class_label(true_class_index),
-                matrix_class_label(predicted_class_index)
-            ),
-            div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(div().text_sm().child(
-                    "この保存結果にはセル別の検証画像がありません。画像情報を含む学習結果を作成してください。",
-                )),
-            "混同行列に戻る",
-        ),
+        } => {
+            let body = match app.artifacts_status.misclassification_report.as_ref() {
+                Some(report) if report.correctly_classified_images.is_some() => {
+                    render_matrix_cell_gallery(
+                        report,
+                        true_class_index,
+                        predicted_class_index,
+                        colors,
+                        cx,
+                    )
+                }
+                _ => render_cell_images_unavailable(colors),
+            };
+            (
+                "セル内の検証画像",
+                format!(
+                    "正解: {} / 予測: {}",
+                    matrix_class_label(true_class_index),
+                    matrix_class_label(predicted_class_index)
+                ),
+                body,
+            )
+        }
     };
 
     let panel = div()
@@ -776,18 +784,22 @@ fn render_evaluation_preview(
                         .flex()
                         .flex_row()
                         .gap_2()
-                        .child(
-                            action_button(
-                                "evaluation-preview-back",
-                                back_label,
-                                false,
-                                true,
-                                colors,
+                        .when_some(back_label, |buttons, back_label| {
+                            buttons.child(
+                                action_button(
+                                    "evaluation-preview-back",
+                                    back_label,
+                                    false,
+                                    true,
+                                    colors,
+                                )
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.return_from_evaluation_preview(cx);
+                                    },
+                                )),
                             )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.return_from_evaluation_preview(cx);
-                            })),
-                        )
+                        })
                         .child(
                             action_button(
                                 "evaluation-preview-close",
@@ -826,6 +838,214 @@ fn render_evaluation_preview(
             this.close_evaluation_preview(cx);
         }))
         .child(panel)
+}
+
+fn evaluation_preview_back_label(preview: &EvaluationPreview) -> Option<&'static str> {
+    match preview {
+        EvaluationPreview::ConfusionMatrix
+        | EvaluationPreview::Image {
+            origin: EvaluationPreviewOrigin::MisclassificationList,
+            ..
+        } => None,
+        EvaluationPreview::ConfusionMatrixCell { .. } => Some("混同行列に戻る"),
+        EvaluationPreview::Image {
+            origin: EvaluationPreviewOrigin::ConfusionMatrixCell { .. },
+            ..
+        } => Some("セルの画像一覧に戻る"),
+    }
+}
+
+fn render_interactive_confusion_matrix(
+    report: &MisclassificationReport,
+    colors: &Colors,
+    cx: &mut Context<HandClassificationApp>,
+) -> Div {
+    const ROW_LABEL_WIDTH: f32 = 120.0;
+
+    let counts = confusion_matrix_counts(report);
+    let max_count = counts.iter().flatten().copied().max().unwrap_or(0).max(1) as f32;
+    let headers = div()
+        .id("confusion-matrix-headings")
+        .flex()
+        .flex_row()
+        .gap_2()
+        .child(div().w(px(ROW_LABEL_WIDTH)).child("正解 ↓ / 予測 →"))
+        .children(MATRIX_CLASS_LABELS.iter().map(|label| {
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .text_center()
+                .text_sm()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(*label)
+        }));
+    let rows = (0..MATRIX_CLASS_LABELS.len()).map(|true_class_index| {
+        div()
+            .id(("confusion-matrix-row", true_class_index))
+            .flex()
+            .flex_row()
+            .gap_2()
+            .child(
+                div()
+                    .w(px(ROW_LABEL_WIDTH))
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(format!("正解: {}", MATRIX_CLASS_LABELS[true_class_index])),
+            )
+            .children((0..MATRIX_CLASS_LABELS.len()).map(|predicted_class_index| {
+                let count = counts[true_class_index][predicted_class_index];
+                let intensity = count as f32 / max_count;
+                div()
+                    .id(format!(
+                        "confusion-matrix-cell-{true_class_index}-{predicted_class_index}"
+                    ))
+                    .flex_1()
+                    .min_w(px(0.))
+                    .h(px(88.))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap_1()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(colors.border)
+                    .bg(colors.selected.opacity(0.12 + intensity * 0.6))
+                    .cursor_pointer()
+                    .hover(|style| style.border_color(colors.selected))
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(format!("{count}")),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(colors.disabled)
+                            .child("画像を表示"),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.show_confusion_matrix_cell(
+                            true_class_index,
+                            predicted_class_index,
+                            cx,
+                        );
+                    }))
+            }))
+    });
+
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(headers)
+        .children(rows)
+}
+
+fn render_matrix_cell_gallery(
+    report: &MisclassificationReport,
+    true_class_index: usize,
+    predicted_class_index: usize,
+    colors: &Colors,
+    cx: &mut Context<HandClassificationApp>,
+) -> Div {
+    let origin = EvaluationPreviewOrigin::ConfusionMatrixCell {
+        true_class_index,
+        predicted_class_index,
+    };
+    let images = matrix_cell_images(report, true_class_index, predicted_class_index);
+
+    if images.is_empty() {
+        return div().flex().flex_col().gap_3().child(
+            div()
+                .text_sm()
+                .child("このセルに該当する検証画像はありません。"),
+        );
+    }
+
+    div()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .child(
+            div()
+                .text_xs()
+                .text_color(colors.disabled)
+                .child(format!("{} 枚", images.len())),
+        )
+        .child(
+            div().flex().flex_row().flex_wrap().gap_2().children(
+                images
+                    .iter()
+                    .map(|image| render_misclassified_image(image, origin.clone(), colors, cx)),
+            ),
+        )
+}
+
+fn render_cell_images_unavailable(colors: &Colors) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .p_4()
+        .rounded_lg()
+        .bg(colors.background)
+        .child(
+            div()
+                .text_sm()
+                .child("この評価結果には正しく分類した画像一覧がありません。"),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(colors.disabled)
+                .child("再学習すると、混同行列の各セルから対象画像を確認できます。"),
+        )
+}
+
+fn confusion_matrix_counts(report: &MisclassificationReport) -> [[usize; 3]; 3] {
+    let mut counts = [[0; 3]; 3];
+    for image in report
+        .images
+        .iter()
+        .chain(report.correctly_classified_images.iter().flatten())
+    {
+        let (Some(true_class_index), Some(predicted_class_index)) = (
+            matrix_class_index(&image.true_label),
+            matrix_class_index(&image.predicted_label),
+        ) else {
+            continue;
+        };
+        counts[true_class_index][predicted_class_index] += 1;
+    }
+    counts
+}
+
+fn matrix_cell_images(
+    report: &MisclassificationReport,
+    true_class_index: usize,
+    predicted_class_index: usize,
+) -> Vec<MisclassifiedImage> {
+    report
+        .images
+        .iter()
+        .chain(report.correctly_classified_images.iter().flatten())
+        .filter(|image| {
+            matrix_class_index(&image.true_label) == Some(true_class_index)
+                && matrix_class_index(&image.predicted_label) == Some(predicted_class_index)
+        })
+        .cloned()
+        .collect()
+}
+
+fn matrix_class_index(label: &str) -> Option<usize> {
+    MATRIX_CLASS_LABELS
+        .iter()
+        .position(|class_label| *class_label == label)
 }
 
 fn render_evaluation_image_preview(
@@ -918,17 +1138,97 @@ fn render_confusion_matrix_image_preview(chart: Option<Arc<Image>>, colors: &Col
                 .text_color(colors.disabled)
                 .child("混同行列が見つかりません。"),
         })
-        .child(
-            div()
-                .text_xs()
-                .text_color(colors.disabled)
-                .child("セルから検証画像を表示するには、画像情報を含む学習結果が必要です。"),
-        )
+        .child(div().text_xs().text_color(colors.disabled).child(
+            "この評価結果にはセル別の検証画像がありません。再学習すると各セルから確認できます。",
+        ))
 }
 
+const MATRIX_CLASS_LABELS: [&str; 3] = ["グー", "チョキ", "パー"];
+
 fn matrix_class_label(index: usize) -> &'static str {
-    ["グー", "チョキ", "パー"]
-        .get(index)
-        .copied()
-        .unwrap_or("不明")
+    MATRIX_CLASS_LABELS.get(index).copied().unwrap_or("不明")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn preview_back_labels_depend_on_navigation_context() {
+        assert_eq!(
+            evaluation_preview_back_label(&EvaluationPreview::ConfusionMatrix),
+            None
+        );
+        assert_eq!(
+            evaluation_preview_back_label(&EvaluationPreview::Image {
+                image: MisclassifiedImage {
+                    image_path: PathBuf::from("validation.png"),
+                    true_label: "グー".to_string(),
+                    predicted_label: "チョキ".to_string(),
+                },
+                origin: EvaluationPreviewOrigin::MisclassificationList,
+            }),
+            None
+        );
+        assert_eq!(
+            evaluation_preview_back_label(&EvaluationPreview::ConfusionMatrixCell {
+                true_class_index: 0,
+                predicted_class_index: 1,
+            }),
+            Some("混同行列に戻る")
+        );
+        assert_eq!(
+            evaluation_preview_back_label(&EvaluationPreview::Image {
+                image: MisclassifiedImage {
+                    image_path: PathBuf::from("validation.png"),
+                    true_label: "グー".to_string(),
+                    predicted_label: "チョキ".to_string(),
+                },
+                origin: EvaluationPreviewOrigin::ConfusionMatrixCell {
+                    true_class_index: 0,
+                    predicted_class_index: 1,
+                },
+            }),
+            Some("セルの画像一覧に戻る")
+        );
+    }
+
+    #[test]
+    fn confusion_matrix_counts_all_images_in_fixed_class_order() {
+        let report = MisclassificationReport {
+            validation_count: 4,
+            images: vec![
+                MisclassifiedImage {
+                    image_path: PathBuf::from("rock-scissors.png"),
+                    true_label: "グー".to_string(),
+                    predicted_label: "チョキ".to_string(),
+                },
+                MisclassifiedImage {
+                    image_path: PathBuf::from("invalid.png"),
+                    true_label: "unknown".to_string(),
+                    predicted_label: "パー".to_string(),
+                },
+            ],
+            correctly_classified_images: Some(vec![
+                MisclassifiedImage {
+                    image_path: PathBuf::from("rock-rock.png"),
+                    true_label: "グー".to_string(),
+                    predicted_label: "グー".to_string(),
+                },
+                MisclassifiedImage {
+                    image_path: PathBuf::from("paper-paper.png"),
+                    true_label: "パー".to_string(),
+                    predicted_label: "パー".to_string(),
+                },
+            ]),
+        };
+
+        assert_eq!(
+            confusion_matrix_counts(&report),
+            [[1, 1, 0], [0, 0, 0], [0, 0, 1]]
+        );
+        assert_eq!(matrix_cell_images(&report, 0, 1).len(), 1);
+        assert!(matrix_cell_images(&report, 1, 2).is_empty());
+    }
 }

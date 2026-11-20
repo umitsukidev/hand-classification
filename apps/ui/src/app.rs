@@ -12,7 +12,7 @@ use crate::{
     },
     components::{action_button, status_pill, tab_button},
     predict_view::render_predict_tab,
-    train_view::render_train_tab,
+    train_view::{render_evaluation_preview, render_train_tab},
     types::{
         ActiveTab, ArtifactsStatus, DatasetSummary, EvaluationPreview, EvaluationPreviewOrigin,
         MisclassifiedImage, PredictionResult, PredictionState, TrainConfig, TrainEvent,
@@ -545,6 +545,7 @@ impl Render for HandClassificationApp {
         let colors = Colors::for_appearance(window);
 
         div()
+            .relative()
             .size_full()
             .flex()
             .flex_col()
@@ -554,6 +555,9 @@ impl Render for HandClassificationApp {
             .child(match self.active_tab {
                 ActiveTab::Predict => render_predict_tab(self, &colors, cx),
                 ActiveTab::Train => render_train_tab(self, &colors, cx),
+            })
+            .when_some(self.evaluation_preview.clone(), |root, preview| {
+                root.child(render_evaluation_preview(self, preview, &colors, cx))
             })
     }
 }
@@ -800,10 +804,38 @@ mod tests {
         assert_eq!(report.images[0].true_label, "グー");
         assert_eq!(report.images[0].predicted_label, "チョキ");
         assert!(!report.images[0].image_path.is_file());
+        assert!(report.correctly_classified_images.is_none());
 
         fs::write(
             artifacts_dir.join("misclassified_images.json"),
-            r#"{"validation_count": 3, "misclassified_images": []}"#,
+            r#"{
+                "validation_count": 3,
+                "misclassified_images": [],
+                "correctly_classified_images": [{
+                    "image_path": "/moved/dataset/rock/correct.png",
+                    "true_label": "グー",
+                    "predicted_label": "グー"
+                }]
+            }"#,
+        )
+        .unwrap();
+        let complete_report = inspect_artifacts(&artifacts_dir)
+            .misclassification_report
+            .unwrap();
+        let correctly_classified_images = complete_report.correctly_classified_images.unwrap();
+        assert_eq!(correctly_classified_images.len(), 1);
+        assert_eq!(
+            correctly_classified_images[0].true_label,
+            correctly_classified_images[0].predicted_label
+        );
+
+        fs::write(
+            artifacts_dir.join("misclassified_images.json"),
+            r#"{
+                "validation_count": 3,
+                "misclassified_images": [],
+                "correctly_classified_images": []
+            }"#,
         )
         .unwrap();
         let empty_report = inspect_artifacts(&artifacts_dir)
@@ -811,6 +843,7 @@ mod tests {
             .unwrap();
         assert_eq!(empty_report.validation_count, 3);
         assert!(empty_report.images.is_empty());
+        assert_eq!(empty_report.correctly_classified_images, Some(vec![]));
 
         let _ = fs::remove_dir_all(root);
     }

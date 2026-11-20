@@ -70,7 +70,7 @@ cargo run
 ```
 
 - **画像判定タブ**: 画像ファイルのドラッグ＆ドロップまたはファイル選択から推論を実行し、予測クラス・確率バー・最近の判定履歴を表示します。
-- **モデル学習タブ**: `data-dir` / `artifacts-dir` や Epochs・Batch Size・Validation Split・Seed を設定して学習を実行し、リアルタイムログ、誤分類画像と正解・予測クラス、評価グラフ（`training_history.png` / `confusion_matrix.png`）を確認できます。
+- **モデル学習タブ**: `data-dir` / `artifacts-dir` や Epochs・Batch Size・Validation Split・Seed を設定して学習を実行し、リアルタイムログと評価グラフ（`training_history.png` / `confusion_matrix.png`）を確認できます。誤分類画像はサムネイルのギャラリーから拡大表示できます。混同行列をクリックするとセル別の検証画像を表示し、そこから各画像も拡大できます。セル別画像のない古い学習結果は、再学習すると利用できます。
 
 ## 構成
 
