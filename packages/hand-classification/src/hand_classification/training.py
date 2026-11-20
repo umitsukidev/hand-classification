@@ -2,7 +2,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import keras
 import numpy as np
@@ -58,7 +58,8 @@ def train_model(
         batch_size,
     )
 
-    model = create_model()
+    class_labels = split.class_directories
+    model = create_model(class_count=len(split.class_directories))
     history = model.fit(
         train_dataset,
         validation_data=validation_dataset,
@@ -91,8 +92,8 @@ def train_model(
     (artifacts_dir / "misclassified_images.json").unlink(missing_ok=True)
     model.save(artifacts_dir / "hand_classifier.keras")
     metadata = {
-        "class_directories": list(CLASS_DIRECTORIES),
-        "class_labels": list(CLASS_LABELS),
+        "class_directories": list(split.class_directories),
+        "class_labels": list(class_labels),
         "image_size": list(IMAGE_SIZE),
     }
     (artifacts_dir / "metadata.json").write_text(
@@ -103,6 +104,7 @@ def train_model(
     confusion_matrix_plot = save_confusion_matrix(
         confusion,
         artifacts_dir / "confusion_matrix.png",
+        class_labels=class_labels,
     )
     save_misclassification_report(
         split.validation_paths,
@@ -110,6 +112,7 @@ def train_model(
         predicted_labels,
         artifacts_dir / "misclassified_images.json",
         confusion_matrix_plot=confusion_matrix_plot,
+        class_labels=class_labels,
     )
     print(f"検証データの正解率: {validation_accuracy:.1%}")
     print(f"モデルと学習結果を保存しました: {artifacts_dir}")
@@ -121,6 +124,7 @@ def save_misclassification_report(
     predicted_labels: np.ndarray,
     output_path: Path,
     confusion_matrix_plot: ConfusionMatrixPlot | None = None,
+    class_labels: tuple[str, ...] = CLASS_LABELS,
 ) -> None:
     misclassified_images = []
     correctly_classified_images = []
@@ -129,8 +133,8 @@ def save_misclassification_report(
     ):
         image_record = {
             "image_path": str(image_path.resolve()),
-            "true_label": CLASS_LABELS[true_label],
-            "predicted_label": CLASS_LABELS[int(predicted_label)],
+            "true_label": class_labels[true_label],
+            "predicted_label": class_labels[int(predicted_label)],
         }
         if true_label == predicted_label:
             correctly_classified_images.append(image_record)
@@ -166,7 +170,14 @@ def save_misclassification_report(
 
 
 def confusion_matrix(split: ImageSplit, predicted_labels: np.ndarray) -> np.ndarray:
-    result = np.zeros((len(CLASS_DIRECTORIES), len(CLASS_DIRECTORIES)), dtype=np.int64)
+    class_count = len(split.class_directories)
+    if predicted_labels.ndim != 1 or len(predicted_labels) != len(
+        split.validation_labels
+    ):
+        raise ValueError("予測件数が検証データ件数と一致しません。")
+    if np.any(predicted_labels < 0) or np.any(predicted_labels >= class_count):
+        raise ValueError("モデルの出力クラス数が学習データと一致しません。")
+    result = np.zeros((class_count, class_count), dtype=np.int64)
     true_labels = np.asarray(split.validation_labels, dtype=np.int64)
     np.add.at(result, (true_labels, predicted_labels), 1)
     return result
@@ -188,19 +199,32 @@ def save_training_plot(history: dict[str, list[float]], output_path: Path) -> No
     plt.close(figure)
 
 
-def save_confusion_matrix(matrix: np.ndarray, output_path: Path) -> ConfusionMatrixPlot:
+def save_confusion_matrix(
+    matrix: np.ndarray,
+    output_path: Path,
+    class_labels: tuple[str, ...] = CLASS_DIRECTORIES,
+) -> ConfusionMatrixPlot:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    figure, axes = plt.subplots(figsize=(7, 6))
+    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
+        raise ValueError("混同行列は正方行列である必要があります。")
+    if matrix.shape[0] != len(class_labels):
+        raise ValueError("混同行列とクラスラベルの数が一致しません。")
+
+    configure_japanese_font(plt)
+    class_count = len(class_labels)
+    figure, axes = plt.subplots(
+        figsize=(max(7, class_count * 1.2), max(6, class_count))
+    )
     axes.imshow(matrix, cmap="Blues", origin="upper")
     axes.set(
-        xticks=range(len(CLASS_LABELS)),
-        yticks=range(len(CLASS_LABELS)),
-        xticklabels=CLASS_DIRECTORIES,
-        yticklabels=CLASS_DIRECTORIES,
+        xticks=range(class_count),
+        yticks=range(class_count),
+        xticklabels=class_labels,
+        yticklabels=class_labels,
         xlabel="Predicted class",
         ylabel="True class",
         title="Confusion matrix",
@@ -241,3 +265,22 @@ def save_confusion_matrix(matrix: np.ndarray, output_path: Path) -> ConfusionMat
     )
     plt.close(figure)
     return plot_geometry
+
+
+def configure_japanese_font(plt: Any) -> None:
+    """Select an already installed Japanese font when one is available."""
+    from matplotlib import font_manager
+
+    preferred_names = (
+        "Noto Sans CJK JP",
+        "Noto Sans JP",
+        "Yu Gothic",
+        "Hiragino Sans",
+        "IPAexGothic",
+        "IPAGothic",
+    )
+    installed_names = {font.name for font in font_manager.fontManager.ttflist}
+    for font_name in preferred_names:
+        if font_name in installed_names:
+            plt.rcParams["font.family"] = font_name
+            break

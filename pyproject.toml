@@ -1,7 +1,7 @@
 [project]
 name = "hand-classification-workspace"
 version = "0.1.0"
-description = "グー・チョキ・パー画像分類のモノレポワークスペース"
+description = "ディレクトリ別画像分類のモノレポワークスペース"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["hand-classification"]

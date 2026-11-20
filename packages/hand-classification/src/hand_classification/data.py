@@ -4,6 +4,8 @@ from pathlib import Path
 import numpy as np
 import tensorflow as tf
 
+# Kept as compatibility defaults for callers that use the package helpers directly.
+# Training discovers its class order from the selected data directory.
 CLASS_DIRECTORIES = ("rock", "scissors", "paper")
 CLASS_LABELS = ("グー", "チョキ", "パー")
 IMAGE_SIZE = (96, 96)
@@ -12,6 +14,7 @@ SUPPORTED_IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png"}
 
 @dataclass(frozen=True)
 class ImageSplit:
+    class_directories: tuple[str, ...]
     train_paths: tuple[Path, ...]
     train_labels: tuple[int, ...]
     validation_paths: tuple[Path, ...]
@@ -30,19 +33,13 @@ def split_image_paths(
     if not data_dir.is_dir():
         raise ValueError(f"データディレクトリが見つかりません: {data_dir}")
 
-    actual_directories = {path.name for path in data_dir.iterdir() if path.is_dir()}
-    expected_directories = set(CLASS_DIRECTORIES)
-    missing = expected_directories - actual_directories
-    extra = actual_directories - expected_directories
-    if missing or extra:
-        details = []
-        if missing:
-            details.append(f"不足: {', '.join(sorted(missing))}")
-        if extra:
-            details.append(f"未対応: {', '.join(sorted(extra))}")
-        expected = ", ".join(CLASS_DIRECTORIES)
+    class_directories = tuple(
+        sorted(path.name for path in data_dir.iterdir() if path.is_dir())
+    )
+    if len(class_directories) < 2:
         raise ValueError(
-            f"クラスディレクトリは {expected} にしてください（{'、'.join(details)}）。"
+            "データディレクトリ直下にクラスディレクトリが2つ以上必要です"
+            f"（現在: {len(class_directories)}個）。"
         )
 
     random_generator = np.random.default_rng(seed)
@@ -51,7 +48,7 @@ def split_image_paths(
     validation_paths: list[Path] = []
     validation_labels: list[int] = []
 
-    for label, directory_name in enumerate(CLASS_DIRECTORIES):
+    for label, directory_name in enumerate(class_directories):
         class_dir = data_dir / directory_name
         image_paths = sorted(
             path
@@ -75,6 +72,7 @@ def split_image_paths(
         validation_labels.extend([label] * len(validation_indices))
 
     return ImageSplit(
+        class_directories=class_directories,
         train_paths=tuple(train_paths),
         train_labels=tuple(train_labels),
         validation_paths=tuple(validation_paths),

@@ -1,7 +1,7 @@
 [project]
 name = "hand-classification"
 version = "0.1.0"
-description = "グー・チョキ・パーの画像を分類するモデル"
+description = "ディレクトリ別の画像を分類するモデル"
 authors = [
     { name = "kurage", email = "git@umitsuki.dev" },
 ]

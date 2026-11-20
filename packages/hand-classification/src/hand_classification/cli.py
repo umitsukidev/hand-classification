@@ -21,7 +21,7 @@ from hand_classification.training import train_model
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="hand-classification",
-        description="グー・チョキ・パーの画像分類モデルを学習・実行します。",
+        description="ディレクトリごとの画像分類モデルを学習・実行します。",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -32,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--data-dir",
         type=Path,
         default=Path("assets/hand_data"),
-        help="rock/scissors/paper の画像フォルダ（既定: assets/hand_data）",
+        help="クラス別サブディレクトリを含むデータフォルダ（既定: assets/hand_data）",
     )
     train_parser.add_argument(
         "--artifacts-dir",
@@ -91,36 +91,42 @@ def main(argv: Sequence[str] | None = None) -> None:
             serve_loop(arguments.artifacts_dir)
             return
 
-        predicted_label, probabilities = predict_image(
-            arguments.image,
-            arguments.artifacts_dir,
+        model, class_directories, class_labels = load_classifier_bundle(
+            arguments.artifacts_dir
+        )
+        predicted_label, probabilities = predict_with_model(
+            model, arguments.image, class_labels
         )
         if arguments.json:
             payload = format_prediction_payload(
                 arguments.image,
                 predicted_label,
                 probabilities,
+                class_directories,
+                class_labels,
             )
             print(json.dumps(payload, ensure_ascii=False))
             return
 
-        predicted_probability = probabilities[CLASS_LABELS.index(predicted_label)]
+        predicted_probability = probabilities[class_labels.index(predicted_label)]
         print(f"判定: {predicted_label} ({predicted_probability:.1%})")
         print(
             "確率: "
             + ", ".join(
                 f"{label} {probability:.1%}"
-                for label, probability in zip(CLASS_LABELS, probabilities, strict=True)
+                for label, probability in zip(class_labels, probabilities, strict=True)
             )
         )
     except (OSError, ValueError, tf.errors.OpError) as error:
         parser.error(str(error))
 
 
-def validate_artifacts(artifacts_dir: Path) -> Path:
-    model_path = artifacts_dir / "hand_classifier.keras"
+def read_artifact_metadata(artifacts_dir: Path) -> dict[str, object]:
     metadata_path = artifacts_dir / "metadata.json"
-    if not model_path.is_file() or not metadata_path.is_file():
+    if (
+        not (artifacts_dir / "hand_classifier.keras").is_file()
+        or not metadata_path.is_file()
+    ):
         raise ValueError(
             f"モデルまたはラベル情報が見つかりません: {artifacts_dir}"
             "（先に train を実行してください）"
@@ -132,37 +138,79 @@ def validate_artifacts(artifacts_dir: Path) -> Path:
         raise ValueError(f"ラベル情報を読み取れません: {metadata_path}") from error
     if not isinstance(metadata, dict):
         raise ValueError(f"ラベル情報の形式が不正です: {metadata_path}")
-    if metadata.get("class_directories") != list(CLASS_DIRECTORIES):
-        raise ValueError(f"モデルのクラス順が対応していません: {metadata_path}")
-    if metadata.get("class_labels") != list(CLASS_LABELS):
-        raise ValueError(f"モデルのクラス名が対応していません: {metadata_path}")
+    class_directories = metadata.get("class_directories")
+    class_labels = metadata.get("class_labels")
+    if (
+        not isinstance(class_directories, list)
+        or len(class_directories) < 2
+        or not all(isinstance(value, str) and value for value in class_directories)
+        or len(set(class_directories)) != len(class_directories)
+    ):
+        raise ValueError(f"クラスディレクトリ情報の形式が不正です: {metadata_path}")
+    if (
+        not isinstance(class_labels, list)
+        or len(class_labels) != len(class_directories)
+        or not all(isinstance(value, str) and value for value in class_labels)
+        or len(set(class_labels)) != len(class_labels)
+    ):
+        raise ValueError(f"クラス名情報の形式が不正です: {metadata_path}")
     if metadata.get("image_size") != list(IMAGE_SIZE):
         raise ValueError(f"モデルの画像サイズが対応していません: {metadata_path}")
+    return metadata
+
+
+def validate_artifacts(artifacts_dir: Path) -> Path:
+    read_artifact_metadata(artifacts_dir)
+    model_path = artifacts_dir / "hand_classifier.keras"
     return model_path
 
 
-def load_classifier(artifacts_dir: Path) -> keras.Model:
+def load_classifier_bundle(
+    artifacts_dir: Path,
+) -> tuple[keras.Model, tuple[str, ...], tuple[str, ...]]:
     model_path = validate_artifacts(artifacts_dir)
+    metadata = read_artifact_metadata(artifacts_dir)
     model = keras.models.load_model(model_path)
     if not isinstance(model, keras.Model):
         raise ValueError(f"モデルの読み込みに失敗しました: {model_path}")
+    raw_directories = metadata["class_directories"]
+    raw_labels = metadata["class_labels"]
+    if not isinstance(raw_directories, list) or not isinstance(raw_labels, list):
+        raise ValueError("モデルのクラス情報が不正です。")
+    class_directories = tuple(raw_directories)
+    class_labels = tuple(raw_labels)
+    output_shape = model.output_shape
+    if isinstance(output_shape, list) and len(output_shape) == 1:
+        output_shape = output_shape[0]
+    if (
+        not isinstance(output_shape, tuple)
+        or len(output_shape) != 2
+        or output_shape[-1] != len(class_labels)
+    ):
+        raise ValueError("モデルの出力クラス数がラベル情報と一致しません。")
+    return model, class_directories, class_labels
+
+
+def load_classifier(artifacts_dir: Path) -> keras.Model:
+    model, _, _ = load_classifier_bundle(artifacts_dir)
     return model
 
 
 def predict_with_model(
     model: keras.Model,
     image_path: Path,
+    class_labels: tuple[str, ...] = CLASS_LABELS,
 ) -> tuple[str, tuple[float, ...]]:
     if not image_path.is_file():
         raise ValueError(f"画像ファイルが見つかりません: {image_path}")
 
     image = load_image_tensor(image_path)
     prediction = model.predict(tf.expand_dims(image, axis=0), verbose=0)[0]
-    if len(prediction) != len(CLASS_LABELS):
+    if len(prediction) != len(class_labels):
         raise ValueError("モデルの出力クラス数がラベル情報と一致しません。")
 
     probabilities = tuple(float(value) for value in np.asarray(prediction))
-    predicted_label = CLASS_LABELS[int(np.argmax(prediction))]
+    predicted_label = class_labels[int(np.argmax(prediction))]
     return predicted_label, probabilities
 
 
@@ -170,21 +218,27 @@ def predict_image(
     image_path: Path,
     artifacts_dir: Path,
 ) -> tuple[str, tuple[float, ...]]:
-    model = load_classifier(artifacts_dir)
-    return predict_with_model(model, image_path)
+    model, _, class_labels = load_classifier_bundle(artifacts_dir)
+    return predict_with_model(model, image_path, class_labels)
 
 
 def format_prediction_payload(
     image_path: Path,
     predicted_label: str,
     probabilities: tuple[float, ...],
+    class_directories: tuple[str, ...] = CLASS_DIRECTORIES,
+    class_labels: tuple[str, ...] = CLASS_LABELS,
 ) -> dict[str, object]:
-    predicted_index = CLASS_LABELS.index(predicted_label)
+    if len(class_directories) != len(class_labels) or len(probabilities) != len(
+        class_labels
+    ):
+        raise ValueError("クラス情報と予測確率の数が一致しません。")
+    predicted_index = class_labels.index(predicted_label)
     return {
         "ok": True,
         "image": str(image_path),
         "predicted_label": predicted_label,
-        "predicted_directory": CLASS_DIRECTORIES[predicted_index],
+        "predicted_directory": class_directories[predicted_index],
         "probabilities": [
             {
                 "directory": directory,
@@ -192,8 +246,8 @@ def format_prediction_payload(
                 "probability": probability,
             }
             for directory, label, probability in zip(
-                CLASS_DIRECTORIES,
-                CLASS_LABELS,
+                class_directories,
+                class_labels,
                 probabilities,
                 strict=True,
             )
@@ -210,24 +264,31 @@ def serve_loop(
     output_stream = sys.stdout if stdout is None else stdout
 
     cached_dir: Path | None = None
-    cached_mtime_ns: int | None = None
-    cached_model: keras.Model | None = None
+    cached_signature: tuple[tuple[int, int], tuple[int, int]] | None = None
+    cached_bundle: tuple[keras.Model, tuple[str, ...], tuple[str, ...]] | None = None
 
-    def get_model(artifacts_dir: Path, force_reload: bool = False) -> keras.Model:
-        nonlocal cached_dir, cached_mtime_ns, cached_model
+    def get_model(
+        artifacts_dir: Path,
+        force_reload: bool = False,
+    ) -> tuple[keras.Model, tuple[str, ...], tuple[str, ...]]:
+        nonlocal cached_dir, cached_signature, cached_bundle
         resolved_dir = artifacts_dir.resolve()
         model_path = validate_artifacts(resolved_dir)
-        mtime_ns = model_path.stat().st_mtime_ns
+        metadata_path = resolved_dir / "metadata.json"
+        signature = (
+            (model_path.stat().st_mtime_ns, model_path.stat().st_size),
+            (metadata_path.stat().st_mtime_ns, metadata_path.stat().st_size),
+        )
         if (
             force_reload
-            or cached_model is None
+            or cached_bundle is None
             or cached_dir != resolved_dir
-            or cached_mtime_ns != mtime_ns
+            or cached_signature != signature
         ):
-            cached_model = load_classifier(resolved_dir)
+            cached_bundle = load_classifier_bundle(resolved_dir)
             cached_dir = resolved_dir
-            cached_mtime_ns = mtime_ns
-        return cached_model
+            cached_signature = signature
+        return cached_bundle
 
     def write_response(payload: dict[str, object]) -> None:
         output_stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
@@ -276,13 +337,19 @@ def serve_loop(
                     raise ValueError("image パスを指定してください。")
                 image_path = Path(raw_image)
                 force_reload = bool(request.get("reload", False))
-                model = get_model(artifacts_dir, force_reload=force_reload)
-                predicted_label, probabilities = predict_with_model(model, image_path)
+                model, class_directories, class_labels = get_model(
+                    artifacts_dir, force_reload=force_reload
+                )
+                predicted_label, probabilities = predict_with_model(
+                    model, image_path, class_labels
+                )
                 write_response(
                     format_prediction_payload(
                         image_path,
                         predicted_label,
                         probabilities,
+                        class_directories,
+                        class_labels,
                     )
                 )
             else:
