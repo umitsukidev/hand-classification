@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use gpui::{
     App, Bounds, Context, Div, FontWeight, PathPromptOptions, Pixels, Task, TitlebarOptions,
-    Window, WindowBounds, WindowOptions, colors::Colors, div, point, prelude::*, px, rgb, size,
+    Window, WindowBounds, WindowOptions, colors::Colors, div, prelude::*, px, rgb, size,
 };
 
 use crate::{
@@ -520,7 +520,7 @@ pub fn run(cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::TestAppContext;
+    use gpui::{TestAppContext, point};
     use std::fs;
 
     fn temp_dir(name: &str) -> PathBuf {
