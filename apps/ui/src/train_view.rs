@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use gpui::{
     Context, DefiniteLength, Div, DragMoveEvent, FontWeight, Image, ObjectFit, Stateful,
-    colors::Colors, div, img, prelude::*, px, rgb,
+    colors::Colors, div, img, prelude::*, px, relative, rgb,
 };
 
 use crate::{
@@ -12,8 +12,8 @@ use crate::{
     },
     components::{action_button, panel_card, small_chip, status_pill},
     types::{
-        EvaluationPreview, EvaluationPreviewOrigin, MisclassificationReport, MisclassifiedImage,
-        display_path,
+        ConfusionMatrixPlotGeometry, EvaluationPreview, EvaluationPreviewOrigin,
+        MisclassificationReport, MisclassifiedImage, NormalizedRect, display_path,
     },
 };
 
@@ -692,23 +692,21 @@ pub fn render_evaluation_preview(
         ),
         EvaluationPreview::ConfusionMatrix => {
             let report = app.artifacts_status.misclassification_report.as_ref();
-            let (description, body) = match report {
-                Some(report) if report.correctly_classified_images.is_some() => {
-                    (
-                        "行が正解クラス、列が予測クラスです。セルを選ぶと該当画像を表示します。"
-                            .to_string(),
-                        render_interactive_confusion_matrix(report, colors, cx),
-                    )
-                }
-                _ => (
-                    "保存済みの混同行列を拡大表示しています。セル内画像を開くには再学習してください。"
-                        .to_string(),
-                    render_confusion_matrix_image_preview(
-                        app.artifacts_status.confusion_matrix_png.clone(),
-                        colors,
-                    ),
-                ),
+            let plot_geometry = report.and_then(clickable_confusion_matrix_geometry);
+            let can_click_cells =
+                plot_geometry.is_some() && app.artifacts_status.confusion_matrix_png.is_some();
+            let description = if can_click_cells {
+                "混同行列のセルをクリックすると、その検証画像を表示します。".to_string()
+            } else {
+                "保存済みの混同行列を拡大表示しています。セル内画像を開くには、この形式で再学習してください。"
+                    .to_string()
             };
+            let body = render_confusion_matrix_image_preview(
+                app.artifacts_status.confusion_matrix_png.clone(),
+                plot_geometry,
+                colors,
+                cx,
+            );
             ("混同行列", description, body)
         }
         EvaluationPreview::ConfusionMatrixCell {
@@ -855,95 +853,79 @@ fn evaluation_preview_back_label(preview: &EvaluationPreview) -> Option<&'static
     }
 }
 
-fn render_interactive_confusion_matrix(
+fn clickable_confusion_matrix_geometry(
     report: &MisclassificationReport,
+) -> Option<&ConfusionMatrixPlotGeometry> {
+    report.correctly_classified_images.as_ref()?;
+    report
+        .confusion_matrix_plot
+        .as_ref()
+        .filter(|geometry| geometry.is_valid())
+}
+
+fn render_clickable_confusion_matrix_image(
+    image: Arc<Image>,
+    geometry: &ConfusionMatrixPlotGeometry,
     colors: &Colors,
     cx: &mut Context<HandClassificationApp>,
 ) -> Div {
-    const ROW_LABEL_WIDTH: f32 = 120.0;
+    const CLASS_COUNT: usize = 3;
+    const MAX_IMAGE_HEIGHT: f32 = 520.0;
+    let mut hit_targets = Vec::with_capacity(CLASS_COUNT * CLASS_COUNT);
+    for true_class_index in 0..CLASS_COUNT {
+        for predicted_class_index in 0..CLASS_COUNT {
+            let cell = geometry
+                .cell_bounds(true_class_index, predicted_class_index, CLASS_COUNT)
+                .expect("valid confusion matrix cell bounds");
+            hit_targets.push(render_confusion_matrix_cell_hit_target(
+                cell,
+                true_class_index,
+                predicted_class_index,
+                colors,
+                cx,
+            ));
+        }
+    }
 
-    let counts = confusion_matrix_counts(report);
-    let max_count = counts.iter().flatten().copied().max().unwrap_or(0).max(1) as f32;
-    let headers = div()
-        .id("confusion-matrix-headings")
-        .flex()
-        .flex_row()
-        .gap_2()
-        .child(div().w(px(ROW_LABEL_WIDTH)).child("正解 ↓ / 予測 →"))
-        .children(MATRIX_CLASS_LABELS.iter().map(|label| {
-            div()
-                .flex_1()
-                .min_w(px(0.))
-                .text_center()
-                .text_sm()
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(*label)
-        }));
-    let rows = (0..MATRIX_CLASS_LABELS.len()).map(|true_class_index| {
+    div().w_full().flex().justify_center().child(
         div()
-            .id(("confusion-matrix-row", true_class_index))
-            .flex()
-            .flex_row()
-            .gap_2()
-            .child(
-                div()
-                    .w(px(ROW_LABEL_WIDTH))
-                    .flex_shrink_0()
-                    .flex()
-                    .items_center()
-                    .text_sm()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(format!("正解: {}", MATRIX_CLASS_LABELS[true_class_index])),
-            )
-            .children((0..MATRIX_CLASS_LABELS.len()).map(|predicted_class_index| {
-                let count = counts[true_class_index][predicted_class_index];
-                let intensity = count as f32 / max_count;
-                div()
-                    .id(format!(
-                        "confusion-matrix-cell-{true_class_index}-{predicted_class_index}"
-                    ))
-                    .flex_1()
-                    .min_w(px(0.))
-                    .h(px(88.))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap_1()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(colors.border)
-                    .bg(colors.selected.opacity(0.12 + intensity * 0.6))
-                    .cursor_pointer()
-                    .hover(|style| style.border_color(colors.selected))
-                    .child(
-                        div()
-                            .text_lg()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(format!("{count}")),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(colors.disabled)
-                            .child("画像を表示"),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.show_confusion_matrix_cell(
-                            true_class_index,
-                            predicted_class_index,
-                            cx,
-                        );
-                    }))
-            }))
-    });
+            .id("confusion-matrix-image-hit-target")
+            .debug_selector(|| "confusion-matrix-image-test".to_string())
+            .relative()
+            .w_full()
+            .max_w(px(MAX_IMAGE_HEIGHT * geometry.aspect_ratio()))
+            .max_h(px(MAX_IMAGE_HEIGHT))
+            .aspect_ratio(geometry.aspect_ratio())
+            .flex_shrink_0()
+            .child(img(image).size_full().object_fit(ObjectFit::Fill))
+            .children(hit_targets),
+    )
+}
 
+fn render_confusion_matrix_cell_hit_target(
+    cell: NormalizedRect,
+    true_class_index: usize,
+    predicted_class_index: usize,
+    colors: &Colors,
+    cx: &mut Context<HandClassificationApp>,
+) -> Stateful<Div> {
     div()
-        .flex()
-        .flex_col()
-        .gap_2()
-        .child(headers)
-        .children(rows)
+        .id(format!(
+            "confusion-matrix-cell-{true_class_index}-{predicted_class_index}"
+        ))
+        .debug_selector(|| {
+            format!("confusion-matrix-cell-{true_class_index}-{predicted_class_index}")
+        })
+        .absolute()
+        .left(relative(cell.left))
+        .top(relative(cell.top))
+        .w(relative(cell.right - cell.left))
+        .h(relative(cell.bottom - cell.top))
+        .cursor_pointer()
+        .hover(|style| style.bg(colors.selected.opacity(0.08)))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.show_confusion_matrix_cell(true_class_index, predicted_class_index, cx);
+        }))
 }
 
 fn render_matrix_cell_gallery(
@@ -1005,24 +987,6 @@ fn render_cell_images_unavailable(colors: &Colors) -> Div {
                 .text_color(colors.disabled)
                 .child("再学習すると、混同行列の各セルから対象画像を確認できます。"),
         )
-}
-
-fn confusion_matrix_counts(report: &MisclassificationReport) -> [[usize; 3]; 3] {
-    let mut counts = [[0; 3]; 3];
-    for image in report
-        .images
-        .iter()
-        .chain(report.correctly_classified_images.iter().flatten())
-    {
-        let (Some(true_class_index), Some(predicted_class_index)) = (
-            matrix_class_index(&image.true_label),
-            matrix_class_index(&image.predicted_label),
-        ) else {
-            continue;
-        };
-        counts[true_class_index][predicted_class_index] += 1;
-    }
-    counts
 }
 
 fn matrix_cell_images(
@@ -1110,13 +1074,22 @@ fn render_evaluation_image_preview(
         )
 }
 
-fn render_confusion_matrix_image_preview(chart: Option<Arc<Image>>, colors: &Colors) -> Div {
-    div()
+fn render_confusion_matrix_image_preview(
+    chart: Option<Arc<Image>>,
+    geometry: Option<&ConfusionMatrixPlotGeometry>,
+    colors: &Colors,
+    cx: &mut Context<HandClassificationApp>,
+) -> Div {
+    let can_click_cells = geometry.is_some() && chart.is_some();
+    let preview = div()
         .flex()
         .flex_col()
         .gap_3()
-        .child(match chart {
-            Some(image) => div()
+        .child(match (chart, geometry) {
+            (Some(image), Some(geometry)) => {
+                render_clickable_confusion_matrix_image(image, geometry, colors, cx)
+            }
+            (Some(image), None) => div()
                 .w_full()
                 .max_h(px(520.))
                 .flex()
@@ -1128,7 +1101,7 @@ fn render_confusion_matrix_image_preview(chart: Option<Arc<Image>>, colors: &Col
                         .max_h(px(520.))
                         .object_fit(ObjectFit::Contain),
                 ),
-            None => div()
+            (None, _) => div()
                 .w_full()
                 .h(px(280.))
                 .flex()
@@ -1137,10 +1110,18 @@ fn render_confusion_matrix_image_preview(chart: Option<Arc<Image>>, colors: &Col
                 .text_sm()
                 .text_color(colors.disabled)
                 .child("混同行列が見つかりません。"),
-        })
-        .child(div().text_xs().text_color(colors.disabled).child(
-            "この評価結果にはセル別の検証画像がありません。再学習すると各セルから確認できます。",
-        ))
+        });
+
+    if can_click_cells {
+        preview
+    } else {
+        preview.child(
+            div()
+                .text_xs()
+                .text_color(colors.disabled)
+                .child("この評価結果にはセルを画像一覧へ対応づける情報がありません。再学習すると混同行列から確認できます。"),
+        )
+    }
 }
 
 const MATRIX_CLASS_LABELS: [&str; 3] = ["グー", "チョキ", "パー"];
@@ -1195,7 +1176,7 @@ mod tests {
     }
 
     #[test]
-    fn confusion_matrix_counts_all_images_in_fixed_class_order() {
+    fn matrix_cell_images_selects_only_the_requested_true_and_predicted_classes() {
         let report = MisclassificationReport {
             validation_count: 4,
             images: vec![
@@ -1222,13 +1203,22 @@ mod tests {
                     predicted_label: "パー".to_string(),
                 },
             ]),
+            confusion_matrix_plot: None,
         };
 
-        assert_eq!(
-            confusion_matrix_counts(&report),
-            [[1, 1, 0], [0, 0, 0], [0, 0, 1]]
-        );
         assert_eq!(matrix_cell_images(&report, 0, 1).len(), 1);
+        assert_eq!(
+            matrix_cell_images(&report, 0, 1)[0].image_path,
+            PathBuf::from("rock-scissors.png")
+        );
+        assert_eq!(
+            matrix_cell_images(&report, 0, 0)[0].image_path,
+            PathBuf::from("rock-rock.png")
+        );
+        assert_eq!(
+            matrix_cell_images(&report, 2, 2)[0].image_path,
+            PathBuf::from("paper-paper.png")
+        );
         assert!(matrix_cell_images(&report, 1, 2).is_empty());
     }
 }

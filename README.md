@@ -43,7 +43,7 @@ uv run hand-classification train \
   --seed 123
 ```
 
-保存されるファイルは `hand_classifier.keras`（モデル）、`metadata.json`（クラス順と画像サイズ）、`training_history.png`（正解率の推移）、`confusion_matrix.png`（検証データの混同行列）、`misclassified_images.json`（検証件数、誤分類画像、正しく分類した画像の一覧）です。画像一覧の各項目には、画像パス・正解クラス・予測クラスが含まれます。
+保存されるファイルは `hand_classifier.keras`（モデル）、`metadata.json`（クラス順と画像サイズ）、`training_history.png`（正解率の推移）、`confusion_matrix.png`（検証データの混同行列）、`misclassified_images.json`（検証件数、誤分類画像、正しく分類した画像の一覧と混同行列の描画位置）です。画像一覧の各項目には、画像パス・正解クラス・予測クラスが含まれます。描画位置のメタデータにより、UIでは保存済みの混同行列 PNG のセル上だけをクリックできます。
 
 ## 画像を判定
 
@@ -70,7 +70,7 @@ cargo run
 ```
 
 - **画像判定タブ**: 画像ファイルのドラッグ＆ドロップまたはファイル選択から推論を実行し、予測クラス・確率バー・最近の判定履歴を表示します。
-- **モデル学習タブ**: `data-dir` / `artifacts-dir` や Epochs・Batch Size・Validation Split・Seed を設定して学習を実行し、リアルタイムログと評価グラフ（`training_history.png` / `confusion_matrix.png`）を確認できます。誤分類画像はサムネイルのギャラリーから拡大表示できます。混同行列をクリックするとセル別の検証画像を表示し、そこから各画像も拡大できます。セル別画像のない古い学習結果は、再学習すると利用できます。
+- **モデル学習タブ**: `data-dir` / `artifacts-dir` や Epochs・Batch Size・Validation Split・Seed を設定して学習を実行し、リアルタイムログと評価グラフ（`training_history.png` / `confusion_matrix.png`）を確認できます。誤分類画像はサムネイルのギャラリーから拡大表示できます。表示中の `confusion_matrix.png` のセルをクリックすると、そのセルの検証画像が開き、各画像も拡大できます。クリック領域はグラフのセル部分に合わせてあり、タイトルや軸ラベル部分では開きません。セル位置メタデータのない古い学習結果は、再学習すると利用できます。
 
 ## 構成
 

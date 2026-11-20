@@ -132,6 +132,88 @@ pub struct MisclassificationReport {
     pub images: Vec<MisclassifiedImage>,
     #[serde(default)]
     pub correctly_classified_images: Option<Vec<MisclassifiedImage>>,
+    #[serde(default, deserialize_with = "deserialize_confusion_matrix_plot")]
+    pub confusion_matrix_plot: Option<ConfusionMatrixPlotGeometry>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+pub struct NormalizedRect {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct ConfusionMatrixPlotGeometry {
+    pub image_width: u32,
+    pub image_height: u32,
+    pub axes_bounds: NormalizedRect,
+}
+
+impl ConfusionMatrixPlotGeometry {
+    pub fn is_valid(&self) -> bool {
+        let bounds = self.axes_bounds;
+        self.image_width > 0
+            && self.image_height > 0
+            && bounds.left.is_finite()
+            && bounds.top.is_finite()
+            && bounds.right.is_finite()
+            && bounds.bottom.is_finite()
+            && bounds.left > 0.0
+            && bounds.left < bounds.right
+            && bounds.right < 1.0
+            && bounds.top > 0.0
+            && bounds.top < bounds.bottom
+            && bounds.bottom < 1.0
+    }
+
+    pub fn aspect_ratio(&self) -> f32 {
+        self.image_width as f32 / self.image_height as f32
+    }
+
+    pub fn cell_bounds(
+        &self,
+        row: usize,
+        column: usize,
+        class_count: usize,
+    ) -> Option<NormalizedRect> {
+        if !self.is_valid() || class_count == 0 || row >= class_count || column >= class_count {
+            return None;
+        }
+
+        let bounds = self.axes_bounds;
+        let cell_width = (bounds.right - bounds.left) / class_count as f32;
+        let cell_height = (bounds.bottom - bounds.top) / class_count as f32;
+        let left = bounds.left + cell_width * column as f32;
+        let top = bounds.top + cell_height * row as f32;
+        Some(NormalizedRect {
+            left,
+            top,
+            right: if column + 1 == class_count {
+                bounds.right
+            } else {
+                left + cell_width
+            },
+            bottom: if row + 1 == class_count {
+                bounds.bottom
+            } else {
+                top + cell_height
+            },
+        })
+    }
+}
+
+fn deserialize_confusion_matrix_plot<'de, D>(
+    deserializer: D,
+) -> Result<Option<ConfusionMatrixPlotGeometry>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value
+        .and_then(|value| serde_json::from_value::<ConfusionMatrixPlotGeometry>(value).ok())
+        .filter(ConfusionMatrixPlotGeometry::is_valid))
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -227,5 +309,62 @@ mod tests {
         assert!(parsed.ok);
         assert_eq!(parsed.predicted_label.as_deref(), Some("グー"));
         assert_eq!(parsed.probabilities.unwrap().len(), 3);
+    }
+
+    #[test]
+    fn confusion_matrix_cells_map_to_the_plot_region_at_multiple_sizes() {
+        let geometry = ConfusionMatrixPlotGeometry {
+            image_width: 700,
+            image_height: 600,
+            axes_bounds: NormalizedRect {
+                left: 0.1,
+                top: 0.05,
+                right: 0.9,
+                bottom: 0.85,
+            },
+        };
+        assert!(geometry.is_valid());
+
+        let first_cell = geometry.cell_bounds(0, 0, 3).unwrap();
+        let last_cell = geometry.cell_bounds(2, 2, 3).unwrap();
+        for (display_width, display_height) in [(700.0, 600.0), (350.0, 300.0), (607.0, 520.0)] {
+            assert!((first_cell.left * display_width - 70.0 * display_width / 700.0).abs() < 0.001);
+            assert!(
+                (first_cell.top * display_height - 30.0 * display_height / 600.0).abs() < 0.001
+            );
+            assert!(
+                (last_cell.right * display_width - 630.0 * display_width / 700.0).abs() < 0.001
+            );
+            assert!(
+                (last_cell.bottom * display_height - 510.0 * display_height / 600.0).abs() < 0.001
+            );
+        }
+        assert!(geometry.cell_bounds(3, 0, 3).is_none());
+        assert!(geometry.cell_bounds(0, 0, 0).is_none());
+    }
+
+    #[test]
+    fn invalid_optional_plot_geometry_does_not_discard_image_report() {
+        let report: MisclassificationReport = serde_json::from_str(
+            r#"{
+                "validation_count": 0,
+                "misclassified_images": [],
+                "correctly_classified_images": [],
+                "confusion_matrix_plot": {
+                    "image_width": 700,
+                    "image_height": 600,
+                    "axes_bounds": {
+                        "left": -0.1,
+                        "top": 0.1,
+                        "right": 0.9,
+                        "bottom": 0.9
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert!(report.confusion_matrix_plot.is_none());
+        assert_eq!(report.correctly_classified_images, Some(vec![]));
     }
 }

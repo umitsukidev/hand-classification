@@ -586,8 +586,8 @@ pub fn run(cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{TestAppContext, point};
-    use std::fs;
+    use gpui::{Image, ImageFormat, Modifiers, TestAppContext, point};
+    use std::{fs, sync::Arc};
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -717,6 +717,90 @@ mod tests {
         });
         view.read_with(cx, |view, _| {
             assert_eq!(view.evaluation_preview, None);
+        });
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[gpui::test]
+    fn confusion_matrix_png_hit_targets_match_rendered_plot_cells(cx: &mut TestAppContext) {
+        let root = temp_dir("confusion_matrix_hit_targets");
+        let (view, cx) =
+            cx.add_window_view(|_, _| HandClassificationApp::with_project_root(root.clone()));
+        let chart = Image::from_bytes(
+            ImageFormat::Png,
+            vec![
+                0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+                0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+                0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0b, 0x49, 0x44, 0x41, 0x54, 0x78,
+                0xda, 0x63, 0xfc, 0xff, 0x1f, 0x00, 0x02, 0x98, 0x01, 0x00, 0x67, 0x5c, 0x02, 0xda,
+                0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+            ],
+        );
+        let geometry = crate::types::ConfusionMatrixPlotGeometry {
+            image_width: 700,
+            image_height: 600,
+            axes_bounds: crate::types::NormalizedRect {
+                left: 0.15,
+                top: 0.1,
+                right: 0.9,
+                bottom: 0.85,
+            },
+        };
+        let matrix_image = crate::types::MisclassifiedImage {
+            image_path: root.join("rock-scissors.png"),
+            true_label: "グー".to_string(),
+            predicted_label: "チョキ".to_string(),
+        };
+
+        view.update_in(cx, |view, _, cx| {
+            view.artifacts_status.confusion_matrix_png = Some(Arc::new(chart));
+            view.artifacts_status.misclassification_report =
+                Some(crate::types::MisclassificationReport {
+                    validation_count: 1,
+                    images: vec![matrix_image],
+                    correctly_classified_images: Some(vec![]),
+                    confusion_matrix_plot: Some(geometry),
+                });
+            view.show_confusion_matrix(cx);
+        });
+
+        let chart_bounds = cx
+            .debug_bounds("confusion-matrix-image-test")
+            .expect("the enlarged confusion matrix image should be rendered");
+        let cell_bounds = cx
+            .debug_bounds("confusion-matrix-cell-0-1")
+            .expect("the off-diagonal cell hit target should be rendered");
+        let axes_left = chart_bounds.left() + chart_bounds.size.width * 0.4;
+        let axes_right = chart_bounds.left() + chart_bounds.size.width * 0.65;
+        let axes_top = chart_bounds.top() + chart_bounds.size.height * 0.1;
+        let axes_bottom = chart_bounds.top() + chart_bounds.size.height * 0.35;
+        assert!((cell_bounds.left() - axes_left).abs() < px(1.));
+        assert!((cell_bounds.right() - axes_right).abs() < px(1.));
+        assert!((cell_bounds.top() - axes_top).abs() < px(1.));
+        assert!((cell_bounds.bottom() - axes_bottom).abs() < px(1.));
+
+        let title_margin = point(
+            chart_bounds.left() + chart_bounds.size.width * 0.02,
+            chart_bounds.top() + chart_bounds.size.height * 0.02,
+        );
+        cx.simulate_click(title_margin, Modifiers::none());
+        view.read_with(cx, |view, _| {
+            assert_eq!(
+                view.evaluation_preview,
+                Some(EvaluationPreview::ConfusionMatrix)
+            );
+        });
+
+        cx.simulate_click(cell_bounds.center(), Modifiers::none());
+        view.read_with(cx, |view, _| {
+            assert_eq!(
+                view.evaluation_preview,
+                Some(EvaluationPreview::ConfusionMatrixCell {
+                    true_class_index: 0,
+                    predicted_class_index: 1,
+                })
+            );
         });
 
         let _ = fs::remove_dir_all(root);
