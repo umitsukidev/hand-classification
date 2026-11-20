@@ -14,8 +14,9 @@ use crate::{
     predict_view::render_predict_tab,
     train_view::render_train_tab,
     types::{
-        ActiveTab, ArtifactsStatus, DatasetSummary, PredictionResult, PredictionState, TrainConfig,
-        TrainEvent, display_path, is_supported_image_path,
+        ActiveTab, ArtifactsStatus, DatasetSummary, EvaluationPreview, EvaluationPreviewOrigin,
+        MisclassifiedImage, PredictionResult, PredictionState, TrainConfig, TrainEvent,
+        display_path, is_supported_image_path,
     },
 };
 
@@ -45,6 +46,7 @@ pub struct HandClassificationApp {
     pub train_status: Option<String>,
     pub train_running: bool,
     pub train_evaluation_ratio: f32,
+    pub evaluation_preview: Option<EvaluationPreview>,
     train_handle: Option<TrainingHandle>,
     worker: WorkerClient,
     predict_generation: u64,
@@ -85,6 +87,7 @@ impl HandClassificationApp {
             train_status: None,
             train_running: false,
             train_evaluation_ratio: DEFAULT_TRAIN_EVALUATION_RATIO,
+            evaluation_preview: None,
             train_handle: None,
             worker: WorkerClient::default(),
             predict_generation: 0,
@@ -325,6 +328,65 @@ impl HandClassificationApp {
         cx: &mut Context<Self>,
     ) {
         self.train_evaluation_ratio = evaluation_ratio_for_pointer(pointer_x, container_bounds);
+        cx.notify();
+    }
+
+    pub fn show_evaluation_image(
+        &mut self,
+        image: MisclassifiedImage,
+        origin: EvaluationPreviewOrigin,
+        cx: &mut Context<Self>,
+    ) {
+        self.evaluation_preview = Some(EvaluationPreview::Image { image, origin });
+        cx.notify();
+    }
+
+    pub fn show_confusion_matrix(&mut self, cx: &mut Context<Self>) {
+        self.evaluation_preview = Some(EvaluationPreview::ConfusionMatrix);
+        cx.notify();
+    }
+
+    pub fn show_confusion_matrix_cell(
+        &mut self,
+        true_class_index: usize,
+        predicted_class_index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.evaluation_preview = Some(EvaluationPreview::ConfusionMatrixCell {
+            true_class_index,
+            predicted_class_index,
+        });
+        cx.notify();
+    }
+
+    pub fn return_from_evaluation_preview(&mut self, cx: &mut Context<Self>) {
+        self.evaluation_preview = match &self.evaluation_preview {
+            Some(EvaluationPreview::ConfusionMatrix) => None,
+            Some(EvaluationPreview::ConfusionMatrixCell { .. }) => {
+                Some(EvaluationPreview::ConfusionMatrix)
+            }
+            Some(EvaluationPreview::Image {
+                origin: EvaluationPreviewOrigin::MisclassificationList,
+                ..
+            }) => None,
+            Some(EvaluationPreview::Image {
+                origin:
+                    EvaluationPreviewOrigin::ConfusionMatrixCell {
+                        true_class_index,
+                        predicted_class_index,
+                    },
+                ..
+            }) => Some(EvaluationPreview::ConfusionMatrixCell {
+                true_class_index: *true_class_index,
+                predicted_class_index: *predicted_class_index,
+            }),
+            _ => return,
+        };
+        cx.notify();
+    }
+
+    pub fn close_evaluation_preview(&mut self, cx: &mut Context<Self>) {
+        self.evaluation_preview = None;
         cx.notify();
     }
 
@@ -593,6 +655,67 @@ mod tests {
 
         assert!((leftmost - maximum_evaluation_ratio).abs() < 0.001);
         assert!((rightmost - minimum_evaluation_ratio).abs() < 0.001);
+    }
+
+    #[gpui::test]
+    fn evaluation_preview_supports_back_and_close(cx: &mut TestAppContext) {
+        let root = temp_dir("evaluation_preview");
+        let (view, cx) =
+            cx.add_window_view(|_, _| HandClassificationApp::with_project_root(root.clone()));
+        let image = MisclassifiedImage {
+            image_path: root.join("validation.png"),
+            true_label: "グー".to_string(),
+            predicted_label: "チョキ".to_string(),
+        };
+
+        view.update_in(cx, |view, _, cx| {
+            view.show_confusion_matrix(cx);
+            view.show_confusion_matrix_cell(0, 1, cx);
+            view.show_evaluation_image(
+                image,
+                EvaluationPreviewOrigin::ConfusionMatrixCell {
+                    true_class_index: 0,
+                    predicted_class_index: 1,
+                },
+                cx,
+            );
+            view.return_from_evaluation_preview(cx);
+        });
+        view.read_with(cx, |view, _| {
+            assert_eq!(
+                view.evaluation_preview,
+                Some(EvaluationPreview::ConfusionMatrixCell {
+                    true_class_index: 0,
+                    predicted_class_index: 1,
+                })
+            );
+        });
+
+        view.update_in(cx, |view, _, cx| {
+            view.return_from_evaluation_preview(cx);
+            view.close_evaluation_preview(cx);
+        });
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.evaluation_preview, None);
+        });
+
+        view.update_in(cx, |view, _, cx| {
+            view.show_evaluation_image(
+                MisclassifiedImage {
+                    image_path: root.join("misclassified.png"),
+                    true_label: "グー".to_string(),
+                    predicted_label: "パー".to_string(),
+                },
+                EvaluationPreviewOrigin::MisclassificationList,
+                cx,
+            );
+            view.return_from_evaluation_preview(cx);
+        });
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.evaluation_preview, None);
+        });
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[gpui::test]

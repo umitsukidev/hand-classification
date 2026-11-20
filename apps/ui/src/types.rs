@@ -132,11 +132,33 @@ pub struct MisclassificationReport {
     pub images: Vec<MisclassifiedImage>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct MisclassifiedImage {
     pub image_path: PathBuf,
     pub true_label: String,
     pub predicted_label: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EvaluationPreviewOrigin {
+    MisclassificationList,
+    ConfusionMatrixCell {
+        true_class_index: usize,
+        predicted_class_index: usize,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EvaluationPreview {
+    ConfusionMatrix,
+    ConfusionMatrixCell {
+        true_class_index: usize,
+        predicted_class_index: usize,
+    },
+    Image {
+        image: MisclassifiedImage,
+        origin: EvaluationPreviewOrigin,
+    },
 }
 
 #[derive(Clone, Debug)]
