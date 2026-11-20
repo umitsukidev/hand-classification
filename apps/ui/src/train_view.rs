@@ -16,8 +16,8 @@ use crate::{
 
 const BATCH_SIZE_OPTIONS: &[usize] = &[8, 16, 32, 64];
 const VALIDATION_SPLIT_OPTIONS: &[f32] = &[0.1, 0.2, 0.25, 0.3];
-const EVALUATION_IMAGE_MAX_HEIGHT: f32 = 360.0;
-const MISSING_IMAGE_HEIGHT: f32 = 180.0;
+const MISCLASSIFIED_THUMBNAIL_SIZE: f32 = 112.0;
+const EVALUATION_CHART_MAX_HEIGHT: f32 = 260.0;
 
 #[derive(Clone, Copy)]
 struct DraggedTrainPaneSplitter;
@@ -547,7 +547,7 @@ fn render_misclassified_image(
     let path = display_path(&image.image_path, project_root);
     div()
         .flex()
-        .flex_col()
+        .flex_row()
         .items_center()
         .gap_3()
         .p_3()
@@ -556,21 +556,22 @@ fn render_misclassified_image(
         .border_color(colors.border)
         .child(if image.image_path.is_file() {
             div()
-                .w_full()
-                .max_h(px(EVALUATION_IMAGE_MAX_HEIGHT))
+                .w(px(MISCLASSIFIED_THUMBNAIL_SIZE))
+                .h(px(MISCLASSIFIED_THUMBNAIL_SIZE))
+                .flex_shrink_0()
                 .flex()
                 .items_center()
                 .justify_center()
                 .child(
                     img(image.image_path.clone())
-                        .w_full()
-                        .max_h(px(EVALUATION_IMAGE_MAX_HEIGHT))
+                        .size_full()
                         .object_fit(ObjectFit::Contain),
                 )
         } else {
             div()
-                .w_full()
-                .h(px(MISSING_IMAGE_HEIGHT))
+                .w(px(MISCLASSIFIED_THUMBNAIL_SIZE))
+                .h(px(MISCLASSIFIED_THUMBNAIL_SIZE))
+                .flex_shrink_0()
                 .flex()
                 .items_center()
                 .justify_center()
@@ -582,7 +583,8 @@ fn render_misclassified_image(
         })
         .child(
             div()
-                .w_full()
+                .flex_1()
+                .min_w(px(0.))
                 .flex()
                 .flex_col()
                 .gap_1()
@@ -613,18 +615,18 @@ fn render_chart_slot(title: &'static str, chart: Option<Arc<Image>>, colors: &Co
         .child(match chart {
             Some(image) => div()
                 .w_full()
-                .max_h(px(EVALUATION_IMAGE_MAX_HEIGHT))
+                .max_h(px(EVALUATION_CHART_MAX_HEIGHT))
                 .flex()
                 .items_center()
                 .justify_center()
                 .child(
                     img(image)
                         .w_full()
-                        .max_h(px(EVALUATION_IMAGE_MAX_HEIGHT))
+                        .max_h(px(EVALUATION_CHART_MAX_HEIGHT))
                         .object_fit(ObjectFit::Contain),
                 ),
             None => div()
-                .h(px(MISSING_IMAGE_HEIGHT))
+                .h(px(MISCLASSIFIED_THUMBNAIL_SIZE))
                 .w_full()
                 .flex()
                 .items_center()
