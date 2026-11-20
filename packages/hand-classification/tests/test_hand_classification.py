@@ -8,8 +8,13 @@ from pathlib import Path
 import numpy as np
 import tensorflow as tf
 
-from hand_classification.cli import main, predict_image, serve_loop
-from hand_classification.data import CLASS_DIRECTORIES, CLASS_LABELS, split_image_paths
+from hand_classification.cli import load_classifier, main, predict_image, serve_loop
+from hand_classification.data import (
+    CLASS_DIRECTORIES,
+    CLASS_LABELS,
+    make_image_dataset,
+    split_image_paths,
+)
 from hand_classification.training import train_model
 
 
@@ -59,14 +64,17 @@ class TrainingSmokeTests(unittest.TestCase):
             data_dir = root / "hand_data"
             artifacts_dir = root / "artifacts"
             create_dataset(data_dir)
+            validation_split = 0.5
+            seed = 123
+            split = split_image_paths(data_dir, validation_split, seed)
 
             train_model(
                 data_dir=data_dir,
                 artifacts_dir=artifacts_dir,
                 epochs=1,
                 batch_size=3,
-                validation_split=0.5,
-                seed=123,
+                validation_split=validation_split,
+                seed=seed,
             )
 
             for artifact_name in (
@@ -74,8 +82,49 @@ class TrainingSmokeTests(unittest.TestCase):
                 "metadata.json",
                 "training_history.png",
                 "confusion_matrix.png",
+                "misclassified_images.json",
             ):
                 self.assertTrue((artifacts_dir / artifact_name).is_file())
+
+            saved_model = load_classifier(artifacts_dir)
+            validation_predictions = np.argmax(
+                saved_model.predict(
+                    make_image_dataset(
+                        split.validation_paths,
+                        split.validation_labels,
+                        batch_size=3,
+                    ),
+                    verbose=0,  # pyright: ignore[reportArgumentType]
+                ),
+                axis=1,
+            )
+            expected_misclassifications = [
+                {
+                    "image_path": str(image_path.resolve()),
+                    "true_label": CLASS_LABELS[true_label],
+                    "predicted_label": CLASS_LABELS[int(predicted_label)],
+                }
+                for image_path, true_label, predicted_label in zip(
+                    split.validation_paths,
+                    split.validation_labels,
+                    validation_predictions,
+                    strict=True,
+                )
+                if true_label != predicted_label
+            ]
+            misclassification_report = json.loads(
+                (artifacts_dir / "misclassified_images.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                misclassification_report["validation_count"],
+                len(split.validation_paths),
+            )
+            self.assertEqual(
+                misclassification_report["misclassified_images"],
+                expected_misclassifications,
+            )
 
             label, probabilities = predict_image(
                 data_dir / "rock" / "sample-0.png",

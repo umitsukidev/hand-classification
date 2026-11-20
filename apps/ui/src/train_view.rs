@@ -7,7 +7,7 @@ use gpui::{
 use crate::{
     app::{DirectoryTarget, HandClassificationApp},
     components::{action_button, panel_card, small_chip, status_pill},
-    types::display_path,
+    types::{MisclassificationReport, MisclassifiedImage, display_path},
 };
 
 const BATCH_SIZE_OPTIONS: &[usize] = &[8, 16, 32, 64];
@@ -420,7 +420,7 @@ fn render_evaluation_card(app: &HandClassificationApp, colors: &Colors) -> Div {
             div()
                 .text_sm()
                 .font_weight(FontWeight::SEMIBOLD)
-                .child("評価グラフ (artifacts)"),
+                .child("評価結果 (artifacts)"),
         )
         .child(
             div()
@@ -431,6 +431,11 @@ fn render_evaluation_card(app: &HandClassificationApp, colors: &Colors) -> Div {
                 .flex()
                 .flex_col()
                 .gap_3()
+                .child(render_misclassification_report(
+                    app.artifacts_status.misclassification_report.as_ref(),
+                    &app.project_root,
+                    colors,
+                ))
                 .child(render_chart_slot(
                     "正解率の推移 (training_history.png)",
                     app.artifacts_status.training_history_png.clone(),
@@ -441,6 +446,117 @@ fn render_evaluation_card(app: &HandClassificationApp, colors: &Colors) -> Div {
                     app.artifacts_status.confusion_matrix_png.clone(),
                     colors,
                 )),
+        )
+}
+
+fn render_misclassification_report(
+    report: Option<&MisclassificationReport>,
+    project_root: &std::path::Path,
+    colors: &Colors,
+) -> Div {
+    let section = div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .p_3()
+        .rounded_lg()
+        .bg(colors.background)
+        .border_1()
+        .border_color(colors.border)
+        .child(
+            div()
+                .text_xs()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child("誤分類一覧 (misclassified_images.json)"),
+        );
+
+    match report {
+        Some(report) if report.images.is_empty() => {
+            section.child(div().text_xs().text_color(colors.disabled).child(format!(
+                "誤分類はありません（検証画像 {} 枚）",
+                report.validation_count
+            )))
+        }
+        Some(report) => section
+            .child(div().text_xs().text_color(colors.disabled).child(format!(
+                "{} 件 / 検証画像 {} 枚",
+                report.images.len(),
+                report.validation_count
+            )))
+            .children(
+                report
+                    .images
+                    .iter()
+                    .map(|image| render_misclassified_image(image, project_root, colors)),
+            ),
+        None => section.child(
+            div()
+                .text_xs()
+                .text_color(colors.disabled)
+                .child("この学習結果の一覧はありません。学習し直すと表示されます。"),
+        ),
+    }
+}
+
+fn render_misclassified_image(
+    image: &MisclassifiedImage,
+    project_root: &std::path::Path,
+    colors: &Colors,
+) -> Div {
+    let path = display_path(&image.image_path, project_root);
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_3()
+        .p_2()
+        .rounded_md()
+        .border_1()
+        .border_color(colors.border)
+        .child(if image.image_path.is_file() {
+            div()
+                .w(px(64.))
+                .h(px(64.))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    img(image.image_path.clone())
+                        .size_full()
+                        .object_fit(ObjectFit::Contain),
+                )
+        } else {
+            div()
+                .w(px(64.))
+                .h(px(64.))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_md()
+                .bg(colors.background)
+                .text_xs()
+                .text_color(colors.disabled)
+                .child("画像なし")
+        })
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(div().text_xs().child(path))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(format!(
+                            "正解: {} → 予測: {}",
+                            image.true_label, image.predicted_label
+                        )),
+                ),
         )
 }
 

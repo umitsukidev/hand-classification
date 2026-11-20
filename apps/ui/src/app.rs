@@ -582,11 +582,48 @@ mod tests {
 
         let artifacts_dir = root.join("artifacts");
         fs::create_dir_all(&artifacts_dir).unwrap();
-        assert!(!inspect_artifacts(&artifacts_dir).model_ready);
+        let initial_artifacts = inspect_artifacts(&artifacts_dir);
+        assert!(!initial_artifacts.model_ready);
+        assert!(initial_artifacts.misclassification_report.is_none());
 
         fs::write(artifacts_dir.join("hand_classifier.keras"), b"model").unwrap();
         fs::write(artifacts_dir.join("metadata.json"), b"{}").unwrap();
         assert!(inspect_artifacts(&artifacts_dir).model_ready);
+
+        fs::write(
+            artifacts_dir.join("misclassified_images.json"),
+            r#"{
+                "validation_count": 3,
+                "misclassified_images": [{
+                    "image_path": "/moved/dataset/rock/example.png",
+                    "true_label": "グー",
+                    "predicted_label": "チョキ"
+                }]
+            }"#,
+        )
+        .unwrap();
+        let report_status = inspect_artifacts(&artifacts_dir);
+        let report = report_status.misclassification_report.unwrap();
+        assert_eq!(report.validation_count, 3);
+        assert_eq!(report.images.len(), 1);
+        assert_eq!(
+            report.images[0].image_path,
+            PathBuf::from("/moved/dataset/rock/example.png")
+        );
+        assert_eq!(report.images[0].true_label, "グー");
+        assert_eq!(report.images[0].predicted_label, "チョキ");
+        assert!(!report.images[0].image_path.is_file());
+
+        fs::write(
+            artifacts_dir.join("misclassified_images.json"),
+            r#"{"validation_count": 3, "misclassified_images": []}"#,
+        )
+        .unwrap();
+        let empty_report = inspect_artifacts(&artifacts_dir)
+            .misclassification_report
+            .unwrap();
+        assert_eq!(empty_report.validation_count, 3);
+        assert!(empty_report.images.is_empty());
 
         let _ = fs::remove_dir_all(root);
     }

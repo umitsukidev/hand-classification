@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 from pathlib import Path
 
 import keras
@@ -55,15 +57,24 @@ def train_model(
                 restore_best_weights=True,
             )
         ],
-        verbose=1,
+        verbose="auto",
     )
-    validation_results = model.evaluate(validation_dataset, verbose=0, return_dict=True)
+    # Keras accepts integer verbosity at runtime; its installed annotations say str.
+    validation_results = model.evaluate(
+        validation_dataset,
+        verbose=0,  # pyright: ignore[reportArgumentType]
+        return_dict=True,
+    )
     validation_accuracy = float(validation_results["accuracy"])
-    predictions = model.predict(validation_dataset, verbose=0)
+    predictions = model.predict(
+        validation_dataset,
+        verbose=0,  # pyright: ignore[reportArgumentType]
+    )
     predicted_labels = np.argmax(predictions, axis=1)
     confusion = confusion_matrix(split, predicted_labels)
 
     artifacts_dir.mkdir(parents=True, exist_ok=True)
+    (artifacts_dir / "misclassified_images.json").unlink(missing_ok=True)
     model.save(artifacts_dir / "hand_classifier.keras")
     metadata = {
         "class_directories": list(CLASS_DIRECTORIES),
@@ -76,13 +87,62 @@ def train_model(
     )
     save_training_plot(history.history, artifacts_dir / "training_history.png")
     save_confusion_matrix(confusion, artifacts_dir / "confusion_matrix.png")
+    save_misclassification_report(
+        split.validation_paths,
+        split.validation_labels,
+        predicted_labels,
+        artifacts_dir / "misclassified_images.json",
+    )
     print(f"検証データの正解率: {validation_accuracy:.1%}")
     print(f"モデルと学習結果を保存しました: {artifacts_dir}")
 
 
+def save_misclassification_report(
+    image_paths: tuple[Path, ...],
+    true_labels: tuple[int, ...],
+    predicted_labels: np.ndarray,
+    output_path: Path,
+) -> None:
+    misclassified_images = [
+        {
+            "image_path": str(image_path.resolve()),
+            "true_label": CLASS_LABELS[true_label],
+            "predicted_label": CLASS_LABELS[int(predicted_label)],
+        }
+        for image_path, true_label, predicted_label in zip(
+            image_paths, true_labels, predicted_labels, strict=True
+        )
+        if true_label != predicted_label
+    ]
+    report = {
+        "validation_count": len(image_paths),
+        "misclassified_images": misclassified_images,
+    }
+    serialized_report = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output_path.parent,
+            prefix=f".{output_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(serialized_report)
+        os.replace(temporary_path, output_path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
 def confusion_matrix(split: ImageSplit, predicted_labels: np.ndarray) -> np.ndarray:
     result = np.zeros((len(CLASS_DIRECTORIES), len(CLASS_DIRECTORIES)), dtype=np.int64)
-    np.add.at(result, (split.validation_labels, predicted_labels), 1)
+    true_labels = np.asarray(split.validation_labels, dtype=np.int64)
+    np.add.at(result, (true_labels, predicted_labels), 1)
     return result
 
 

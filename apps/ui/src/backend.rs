@@ -12,8 +12,8 @@ use gpui::{Image, ImageFormat};
 use serde::Serialize;
 
 use crate::types::{
-    ArtifactsStatus, DatasetSummary, PredictionResult, TrainConfig, TrainEvent, WorkerResponse,
-    is_supported_image_path,
+    ArtifactsStatus, DatasetSummary, MisclassificationReport, PredictionResult, TrainConfig,
+    TrainEvent, WorkerResponse, is_supported_image_path,
 };
 
 pub fn locate_project_root() -> PathBuf {
@@ -132,6 +132,12 @@ fn load_png_image(path: &Path) -> Option<Arc<Image>> {
     Some(Arc::new(Image::from_bytes(ImageFormat::Png, bytes)))
 }
 
+fn load_misclassification_report(artifacts_dir: &Path) -> Option<MisclassificationReport> {
+    let artifact_path = artifacts_dir.join("misclassified_images.json");
+    let bytes = fs::read(artifact_path).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
 pub fn inspect_artifacts(artifacts_dir: &Path) -> ArtifactsStatus {
     let model_ready = artifacts_dir.join("hand_classifier.keras").is_file()
         && artifacts_dir.join("metadata.json").is_file();
@@ -140,6 +146,7 @@ pub fn inspect_artifacts(artifacts_dir: &Path) -> ArtifactsStatus {
         model_ready,
         training_history_png: load_png_image(&artifacts_dir.join("training_history.png")),
         confusion_matrix_png: load_png_image(&artifacts_dir.join("confusion_matrix.png")),
+        misclassification_report: load_misclassification_report(artifacts_dir),
     }
 }
 

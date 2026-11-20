@@ -43,7 +43,7 @@ uv run hand-classification train \
   --seed 123
 ```
 
-保存されるファイルは `hand_classifier.keras`（モデル）、`metadata.json`（クラス順と画像サイズ）、`training_history.png`（正解率の推移）、`confusion_matrix.png`（検証データの混同行列）です。
+保存されるファイルは `hand_classifier.keras`（モデル）、`metadata.json`（クラス順と画像サイズ）、`training_history.png`（正解率の推移）、`confusion_matrix.png`（検証データの混同行列）、`misclassified_images.json`（検証データで誤分類した画像のパス・正解・予測クラス）です。
 
 ## 画像を判定
 
@@ -70,7 +70,7 @@ cargo run
 ```
 
 - **画像判定タブ**: 画像ファイルのドラッグ＆ドロップまたはファイル選択から推論を実行し、予測クラス・確率バー・最近の判定履歴を表示します。
-- **モデル学習タブ**: `data-dir` / `artifacts-dir` や Epochs・Batch Size・Validation Split・Seed を設定して学習を実行し、リアルタイムログと評価グラフ（`training_history.png` / `confusion_matrix.png`）を確認できます。
+- **モデル学習タブ**: `data-dir` / `artifacts-dir` や Epochs・Batch Size・Validation Split・Seed を設定して学習を実行し、リアルタイムログ、誤分類画像と正解・予測クラス、評価グラフ（`training_history.png` / `confusion_matrix.png`）を確認できます。
 
 ## 構成
 

@@ -122,6 +122,21 @@ pub struct ArtifactsStatus {
     pub model_ready: bool,
     pub training_history_png: Option<Arc<Image>>,
     pub confusion_matrix_png: Option<Arc<Image>>,
+    pub misclassification_report: Option<MisclassificationReport>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct MisclassificationReport {
+    pub validation_count: usize,
+    #[serde(rename = "misclassified_images")]
+    pub images: Vec<MisclassifiedImage>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct MisclassifiedImage {
+    pub image_path: PathBuf,
+    pub true_label: String,
+    pub predicted_label: String,
 }
 
 #[derive(Clone, Debug)]
