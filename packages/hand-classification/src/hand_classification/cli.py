@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import sys
 from collections.abc import Sequence
@@ -264,7 +265,7 @@ def serve_loop(
     output_stream = sys.stdout if stdout is None else stdout
 
     cached_dir: Path | None = None
-    cached_signature: tuple[tuple[int, int], tuple[int, int]] | None = None
+    cached_signature: tuple[tuple[int, int], tuple[int, int], bytes] | None = None
     cached_bundle: tuple[keras.Model, tuple[str, ...], tuple[str, ...]] | None = None
 
     def get_model(
@@ -278,6 +279,7 @@ def serve_loop(
         signature = (
             (model_path.stat().st_mtime_ns, model_path.stat().st_size),
             (metadata_path.stat().st_mtime_ns, metadata_path.stat().st_size),
+            hashlib.sha256(metadata_path.read_bytes()).digest(),
         )
         if (
             force_reload

@@ -106,6 +106,40 @@ class DataSplitTests(unittest.TestCase):
             )
             self.assertNotIn(data_dir / "root-image.png", image_labels)
 
+    @unittest.skipUnless(os.name == "posix", "symlinks require a POSIX filesystem")
+    def test_nested_symlink_directories_are_skipped_but_symlink_images_are_counted(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            data_dir = root / "data"
+            create_dataset(
+                data_dir,
+                images_per_class=2,
+                class_directories=("alpha", "beta"),
+            )
+            external_dir = root / "external"
+            external_dir.mkdir()
+            write_image(external_dir / "external.png", (40, 40, 40))
+            try:
+                os.symlink(
+                    data_dir / "alpha" / "sample-0.png",
+                    data_dir / "alpha" / "linked.png",
+                )
+                os.symlink(external_dir, data_dir / "alpha" / "linked-dir")
+                os.symlink(data_dir / "alpha", data_dir / "alpha" / "loop")
+            except OSError as error:
+                self.skipTest(f"unable to create symlinks: {error}")
+
+            split = split_image_paths(data_dir, validation_split=0.5, seed=123)
+            all_paths = split.train_paths + split.validation_paths
+            all_labels = split.train_labels + split.validation_labels
+            image_labels = dict(zip(all_paths, all_labels, strict=True))
+
+            self.assertEqual(image_labels[data_dir / "alpha" / "linked.png"], 0)
+            self.assertEqual(sum(label == 0 for label in all_labels), 3)
+            self.assertFalse(any("linked-dir" in path.parts for path in all_paths))
+
 
 class ConfusionMatrixGeometryTests(unittest.TestCase):
     def test_plot_metadata_matches_full_png_axes_and_cell_centers(self) -> None:
@@ -283,6 +317,29 @@ class TrainingSmokeTests(unittest.TestCase):
             self.assertEqual(
                 len(cli_payload["probabilities"]), len(split.class_directories)
             )
+            self.assertEqual(
+                [item["directory"] for item in cli_payload["probabilities"]],
+                list(split.class_directories),
+            )
+            self.assertEqual(
+                [item["label"] for item in cli_payload["probabilities"]],
+                list(split.class_directories),
+            )
+
+            text_stdout = io.StringIO()
+            with redirect_stdout(text_stdout):
+                main(
+                    [
+                        "predict",
+                        str(image_path),
+                        "--artifacts-dir",
+                        str(artifacts_dir),
+                    ]
+                )
+            text_payload = text_stdout.getvalue()
+            self.assertIn("判定:", text_payload)
+            for directory in split.class_directories:
+                self.assertIn(f"{directory} ", text_payload)
 
             requests = "\n".join(
                 [
@@ -321,6 +378,10 @@ class TrainingSmokeTests(unittest.TestCase):
             self.assertTrue(responses[2]["ok"])
             self.assertIn(responses[2]["predicted_label"], split.class_directories)
             self.assertIn(responses[2]["predicted_directory"], split.class_directories)
+            self.assertEqual(
+                [item["directory"] for item in responses[2]["probabilities"]],
+                list(split.class_directories),
+            )
             self.assertFalse(responses[3]["ok"])
             self.assertFalse(responses[4]["ok"])
             self.assertFalse(responses[5]["ok"])
@@ -419,13 +480,17 @@ class ArtifactCompatibilityTests(unittest.TestCase):
                 def __iter__(self):
                     request = json.dumps({"op": "predict", "image": str(image_path)})
                     yield request + "\n"
+                    original_stat = metadata_path.stat()
                     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-                    metadata["class_directories"] = ["新カテゴリA", "新カテゴリB"]
-                    metadata["class_labels"] = ["分類A", "分類B"]
+                    metadata["class_directories"] = ["class_c", "class_d"]
+                    metadata["class_labels"] = ["C", "D"]
                     metadata_path.write_text(
                         json.dumps(metadata, ensure_ascii=False), encoding="utf-8"
                     )
-                    os.utime(metadata_path, None)
+                    os.utime(
+                        metadata_path,
+                        ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+                    )
                     yield request + "\n"
 
             output = io.StringIO()
@@ -435,11 +500,11 @@ class ArtifactCompatibilityTests(unittest.TestCase):
             self.assertEqual(len(responses), 2)
             self.assertEqual(responses[0]["predicted_directory"], "class_a")
             self.assertEqual(responses[0]["predicted_label"], "A")
-            self.assertEqual(responses[1]["predicted_directory"], "新カテゴリA")
-            self.assertEqual(responses[1]["predicted_label"], "分類A")
+            self.assertEqual(responses[1]["predicted_directory"], "class_c")
+            self.assertEqual(responses[1]["predicted_label"], "C")
             self.assertEqual(
                 [entry["directory"] for entry in responses[1]["probabilities"]],
-                ["新カテゴリA", "新カテゴリB"],
+                ["class_c", "class_d"],
             )
 
 
