@@ -103,20 +103,25 @@ def save_misclassification_report(
     predicted_labels: np.ndarray,
     output_path: Path,
 ) -> None:
-    misclassified_images = [
-        {
+    misclassified_images = []
+    correctly_classified_images = []
+    for image_path, true_label, predicted_label in zip(
+        image_paths, true_labels, predicted_labels, strict=True
+    ):
+        image_record = {
             "image_path": str(image_path.resolve()),
             "true_label": CLASS_LABELS[true_label],
             "predicted_label": CLASS_LABELS[int(predicted_label)],
         }
-        for image_path, true_label, predicted_label in zip(
-            image_paths, true_labels, predicted_labels, strict=True
-        )
-        if true_label != predicted_label
-    ]
+        if true_label == predicted_label:
+            correctly_classified_images.append(image_record)
+        else:
+            misclassified_images.append(image_record)
+
     report = {
         "validation_count": len(image_paths),
         "misclassified_images": misclassified_images,
+        "correctly_classified_images": correctly_classified_images,
     }
     serialized_report = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
 

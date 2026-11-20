@@ -43,7 +43,7 @@ uv run hand-classification train \
   --seed 123
 ```
 
-保存されるファイルは `hand_classifier.keras`（モデル）、`metadata.json`（クラス順と画像サイズ）、`training_history.png`（正解率の推移）、`confusion_matrix.png`（検証データの混同行列）、`misclassified_images.json`（検証データで誤分類した画像のパス・正解・予測クラス）です。
+保存されるファイルは `hand_classifier.keras`（モデル）、`metadata.json`（クラス順と画像サイズ）、`training_history.png`（正解率の推移）、`confusion_matrix.png`（検証データの混同行列）、`misclassified_images.json`（検証件数、誤分類画像、正しく分類した画像の一覧）です。画像一覧の各項目には、画像パス・正解クラス・予測クラスが含まれます。
 
 ## 画像を判定
 

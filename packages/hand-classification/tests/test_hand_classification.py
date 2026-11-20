@@ -112,6 +112,20 @@ class TrainingSmokeTests(unittest.TestCase):
                 )
                 if true_label != predicted_label
             ]
+            expected_correctly_classified = [
+                {
+                    "image_path": str(image_path.resolve()),
+                    "true_label": CLASS_LABELS[true_label],
+                    "predicted_label": CLASS_LABELS[int(predicted_label)],
+                }
+                for image_path, true_label, predicted_label in zip(
+                    split.validation_paths,
+                    split.validation_labels,
+                    validation_predictions,
+                    strict=True,
+                )
+                if true_label == predicted_label
+            ]
             misclassification_report = json.loads(
                 (artifacts_dir / "misclassified_images.json").read_text(
                     encoding="utf-8"
@@ -124,6 +138,15 @@ class TrainingSmokeTests(unittest.TestCase):
             self.assertEqual(
                 misclassification_report["misclassified_images"],
                 expected_misclassifications,
+            )
+            self.assertEqual(
+                misclassification_report["correctly_classified_images"],
+                expected_correctly_classified,
+            )
+            self.assertEqual(
+                len(misclassification_report["misclassified_images"])
+                + len(misclassification_report["correctly_classified_images"]),
+                misclassification_report["validation_count"],
             )
 
             label, probabilities = predict_image(
