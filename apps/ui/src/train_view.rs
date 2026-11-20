@@ -16,6 +16,8 @@ use crate::{
 
 const BATCH_SIZE_OPTIONS: &[usize] = &[8, 16, 32, 64];
 const VALIDATION_SPLIT_OPTIONS: &[f32] = &[0.1, 0.2, 0.25, 0.3];
+const EVALUATION_IMAGE_MAX_HEIGHT: f32 = 360.0;
+const MISSING_IMAGE_HEIGHT: f32 = 180.0;
 
 #[derive(Clone, Copy)]
 struct DraggedTrainPaneSplitter;
@@ -545,31 +547,30 @@ fn render_misclassified_image(
     let path = display_path(&image.image_path, project_root);
     div()
         .flex()
-        .flex_row()
+        .flex_col()
         .items_center()
         .gap_3()
-        .p_2()
+        .p_3()
         .rounded_md()
         .border_1()
         .border_color(colors.border)
         .child(if image.image_path.is_file() {
             div()
-                .w(px(64.))
-                .h(px(64.))
-                .flex_shrink_0()
+                .w_full()
+                .max_h(px(EVALUATION_IMAGE_MAX_HEIGHT))
                 .flex()
                 .items_center()
                 .justify_center()
                 .child(
                     img(image.image_path.clone())
-                        .size_full()
+                        .w_full()
+                        .max_h(px(EVALUATION_IMAGE_MAX_HEIGHT))
                         .object_fit(ObjectFit::Contain),
                 )
         } else {
             div()
-                .w(px(64.))
-                .h(px(64.))
-                .flex_shrink_0()
+                .w_full()
+                .h(px(MISSING_IMAGE_HEIGHT))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -581,8 +582,7 @@ fn render_misclassified_image(
         })
         .child(
             div()
-                .flex_1()
-                .min_w(px(0.))
+                .w_full()
                 .flex()
                 .flex_col()
                 .gap_1()
@@ -612,14 +612,19 @@ fn render_chart_slot(title: &'static str, chart: Option<Arc<Image>>, colors: &Co
         .child(div().text_xs().text_color(colors.disabled).child(title))
         .child(match chart {
             Some(image) => div()
-                .h(px(190.))
                 .w_full()
+                .max_h(px(EVALUATION_IMAGE_MAX_HEIGHT))
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(img(image).size_full().object_fit(ObjectFit::Contain)),
+                .child(
+                    img(image)
+                        .w_full()
+                        .max_h(px(EVALUATION_IMAGE_MAX_HEIGHT))
+                        .object_fit(ObjectFit::Contain),
+                ),
             None => div()
-                .h(px(96.))
+                .h(px(MISSING_IMAGE_HEIGHT))
                 .w_full()
                 .flex()
                 .items_center()
