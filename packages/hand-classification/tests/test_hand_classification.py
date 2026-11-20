@@ -1,5 +1,6 @@
 import io
 import json
+import struct
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -15,7 +16,7 @@ from hand_classification.data import (
     make_image_dataset,
     split_image_paths,
 )
-from hand_classification.training import train_model
+from hand_classification.training import save_confusion_matrix, train_model
 
 
 def write_image(path: Path, color: tuple[int, int, int]) -> None:
@@ -55,6 +56,46 @@ class DataSplitTests(unittest.TestCase):
             create_dataset(data_dir, images_per_class=1)
             with self.assertRaisesRegex(ValueError, "2枚以上"):
                 split_image_paths(data_dir, validation_split=0.2, seed=123)
+
+
+class ConfusionMatrixGeometryTests(unittest.TestCase):
+    def test_plot_metadata_matches_full_png_axes_and_cell_centers(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output_path = Path(temporary_directory) / "confusion_matrix.png"
+            geometry = save_confusion_matrix(
+                np.asarray([[4, 0, 1], [2, 3, 0], [0, 1, 5]]),
+                output_path,
+            )
+
+            with output_path.open("rb") as image_file:
+                png_header = image_file.read(24)
+            self.assertEqual(png_header[:8], b"\x89PNG\r\n\x1a\n")
+            image_width, image_height = struct.unpack(">II", png_header[16:24])
+            self.assertEqual(geometry["image_width"], image_width)
+            self.assertEqual(geometry["image_height"], image_height)
+
+            axes = geometry["axes_bounds"]
+            self.assertGreater(axes["left"], 0.0)
+            self.assertLess(axes["left"], axes["right"])
+            self.assertLess(axes["right"], 1.0)
+            self.assertGreater(axes["top"], 0.0)
+            self.assertLess(axes["top"], axes["bottom"])
+            self.assertLess(axes["bottom"], 1.0)
+
+            axes_width = (axes["right"] - axes["left"]) * image_width
+            axes_height = (axes["bottom"] - axes["top"]) * image_height
+            self.assertAlmostEqual(axes_width, axes_height, places=5)
+
+            first_cell_center = (
+                axes["left"] + (axes["right"] - axes["left"]) / 6,
+                axes["top"] + (axes["bottom"] - axes["top"]) / 6,
+            )
+            last_cell_center = (
+                axes["left"] + (axes["right"] - axes["left"]) * 5 / 6,
+                axes["top"] + (axes["bottom"] - axes["top"]) * 5 / 6,
+            )
+            self.assertLess(first_cell_center[0], last_cell_center[0])
+            self.assertLess(first_cell_center[1], last_cell_center[1])
 
 
 class TrainingSmokeTests(unittest.TestCase):
@@ -130,6 +171,13 @@ class TrainingSmokeTests(unittest.TestCase):
                 (artifacts_dir / "misclassified_images.json").read_text(
                     encoding="utf-8"
                 )
+            )
+            confusion_matrix_plot = misclassification_report["confusion_matrix_plot"]
+            self.assertGreater(confusion_matrix_plot["image_width"], 0)
+            self.assertGreater(confusion_matrix_plot["image_height"], 0)
+            self.assertEqual(
+                set(confusion_matrix_plot["axes_bounds"]),
+                {"left", "top", "right", "bottom"},
             )
             self.assertEqual(
                 misclassification_report["validation_count"],

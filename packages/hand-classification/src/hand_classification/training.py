@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import TypedDict
 
 import keras
 import numpy as np
@@ -15,6 +16,19 @@ from hand_classification.data import (
     split_image_paths,
 )
 from hand_classification.model import create_model
+
+
+class PlotAxesBounds(TypedDict):
+    left: float
+    top: float
+    right: float
+    bottom: float
+
+
+class ConfusionMatrixPlot(TypedDict):
+    image_width: int
+    image_height: int
+    axes_bounds: PlotAxesBounds
 
 
 def train_model(
@@ -86,12 +100,16 @@ def train_model(
         encoding="utf-8",
     )
     save_training_plot(history.history, artifacts_dir / "training_history.png")
-    save_confusion_matrix(confusion, artifacts_dir / "confusion_matrix.png")
+    confusion_matrix_plot = save_confusion_matrix(
+        confusion,
+        artifacts_dir / "confusion_matrix.png",
+    )
     save_misclassification_report(
         split.validation_paths,
         split.validation_labels,
         predicted_labels,
         artifacts_dir / "misclassified_images.json",
+        confusion_matrix_plot=confusion_matrix_plot,
     )
     print(f"検証データの正解率: {validation_accuracy:.1%}")
     print(f"モデルと学習結果を保存しました: {artifacts_dir}")
@@ -102,6 +120,7 @@ def save_misclassification_report(
     true_labels: tuple[int, ...],
     predicted_labels: np.ndarray,
     output_path: Path,
+    confusion_matrix_plot: ConfusionMatrixPlot | None = None,
 ) -> None:
     misclassified_images = []
     correctly_classified_images = []
@@ -118,11 +137,13 @@ def save_misclassification_report(
         else:
             misclassified_images.append(image_record)
 
-    report = {
+    report: dict[str, object] = {
         "validation_count": len(image_paths),
         "misclassified_images": misclassified_images,
         "correctly_classified_images": correctly_classified_images,
     }
+    if confusion_matrix_plot is not None:
+        report["confusion_matrix_plot"] = confusion_matrix_plot
     serialized_report = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -167,7 +188,7 @@ def save_training_plot(history: dict[str, list[float]], output_path: Path) -> No
     plt.close(figure)
 
 
-def save_confusion_matrix(matrix: np.ndarray, output_path: Path) -> None:
+def save_confusion_matrix(matrix: np.ndarray, output_path: Path) -> ConfusionMatrixPlot:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -200,5 +221,23 @@ def save_confusion_matrix(matrix: np.ndarray, output_path: Path) -> None:
                 color="white" if matrix[row, column] > threshold else "black",
             )
     figure.tight_layout()
-    figure.savefig(output_path)
+    figure.canvas.draw()
+    image_width, image_height = figure.canvas.get_width_height()
+    axes_bounds = axes.get_position()
+    plot_geometry: ConfusionMatrixPlot = {
+        "image_width": image_width,
+        "image_height": image_height,
+        "axes_bounds": {
+            "left": float(axes_bounds.x0),
+            "top": float(1.0 - axes_bounds.y1),
+            "right": float(axes_bounds.x1),
+            "bottom": float(1.0 - axes_bounds.y0),
+        },
+    }
+    figure.savefig(
+        output_path,
+        dpi=figure.dpi,
+        bbox_inches=figure.bbox_inches,
+    )
     plt.close(figure)
+    return plot_geometry
